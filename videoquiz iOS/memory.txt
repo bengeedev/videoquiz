@@ -1,0 +1,1993 @@
+// AppDelegate.swift
+import UIKit
+
+@main
+class AppDelegate: UIResponder, UIApplicationDelegate {
+    var window: UIWindow?
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        window = UIWindow(frame: UIScreen.main.bounds)
+        // Instantiate MenuViewController as the root view controller
+        let menuVC = MenuViewController()
+        window?.rootViewController = UINavigationController(rootViewController: menuVC)
+        window?.makeKeyAndVisible()
+        return true
+    }
+}
+
+//
+//  Animations.swift
+//  Chef Quiz - 2025
+//
+//  Created by Benjamin Gievis on 03/03/2025
+//
+
+import UIKit
+
+struct Animations {
+    
+    private static func animate(
+        duration: TimeInterval,
+        delay: TimeInterval = 0,
+        usingSpringWithDamping damping: CGFloat? = nil,
+        initialSpringVelocity velocity: CGFloat? = nil,
+        options: UIView.AnimationOptions = .curveEaseInOut,
+        animations: @escaping () -> Void,
+        completion: ((Bool) -> Void)? = nil
+    ) {
+        if let damping = damping, let velocity = velocity {
+            UIView.animate(
+                withDuration: duration,
+                delay: delay,
+                usingSpringWithDamping: damping,
+                initialSpringVelocity: velocity,
+                options: options,
+                animations: animations,
+                completion: completion
+            )
+        } else {
+            UIView.animate(
+                withDuration: duration,
+                delay: delay,
+                options: options,
+                animations: animations,
+                completion: completion
+            )
+        }
+    }
+    
+    static func animateWin(for cells: [UICollectionViewCell], completion: @escaping () -> Void) {
+        let group = DispatchGroup()
+        for cell in cells {
+            group.enter()
+            // Step 1: Color green + scale up (with spring)
+            animate(
+                duration: 0.3,
+                usingSpringWithDamping: 0.6,
+                initialSpringVelocity: 0.5
+            ) {
+                cell.contentView.backgroundColor = .green
+                cell.transform = CGAffineTransform(scaleX: 1.1, y: 1.1)
+            } completion: { _ in
+                // Optional: Shake a bit while green (just for extra effect)
+                shake(cell: cell, amplitude: 4.0, repeats: 3)
+                
+                // Step 2: Return to identity scale
+                animate(duration: 0.2) {
+                    cell.transform = .identity
+                } completion: { _ in
+                    group.leave()
+                }
+            }
+        }
+        group.notify(queue: .main) {
+            // Slight delay to let the final animation settle
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                completion()
+            }
+        }
+    }
+    
+    static func animateError(for cells: [UICollectionViewCell], completion: @escaping () -> Void) {
+        // Step 1: Turn red quickly
+        for cell in cells {
+            animate(duration: 0.05) {
+                cell.contentView.backgroundColor = .red
+            } completion: { _ in
+                // Step 2: Shake each cell
+                shake(cell: cell, amplitude: 10.0, repeats: 5)
+            }
+        }
+        // Once all are turned red and shaken, call the completion (no revert here!)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            completion()
+        }
+    }
+    
+    static func revertToNormal(cell: UICollectionViewCell, completion: (() -> Void)? = nil) {
+        animate(duration: 0.3) {
+            cell.contentView.backgroundColor = .white
+        } completion: { _ in
+            completion?()
+        }
+    }
+    
+    private static func shake(cell: UICollectionViewCell, amplitude: CGFloat, repeats: Float) {
+        let shake = CABasicAnimation(keyPath: "position")
+        shake.duration = 0.05
+        shake.repeatCount = repeats
+        shake.autoreverses = true
+        let fromPoint = CGPoint(x: cell.center.x - amplitude, y: cell.center.y)
+        let toPoint = CGPoint(x: cell.center.x + amplitude, y: cell.center.y)
+        shake.fromValue = NSValue(cgPoint: fromPoint)
+        shake.toValue = NSValue(cgPoint: toPoint)
+        cell.layer.add(shake, forKey: "position")
+    }
+
+}
+
+
+//
+//  GameBoardManager.swift
+//  Chef Quiz - 2025 iOS
+//
+//  Created by Benjamin Gievis on 03/03/2025
+//
+
+import UIKit
+
+class GameBoardManager {
+    // ---------------------------
+    // MARK: - Internal Properties
+    // ---------------------------
+    
+    // Expose `originalTargetWord` so GameViewModel can read/write it.
+    var originalTargetWord: String = ""
+    
+    /// Current guess array, each index is a letter the user placed (or nil).
+    private var currentGuess: [String?] = []
+    
+    /// This indicates whether each slot is “frozen” (i.e. placed via hint).
+    /// Frozen slots cannot be tapped or removed by the user.
+    var frozenSlots = Set<Int>()
+    
+    private var availableLetters: [LetterTile] = []
+    private var initialAvailableLetters: [LetterTile] = []
+    private var guessMapping: [Int?] = []
+    private weak var collectionView: UICollectionView?
+    
+    /// Start with 0 coins to avoid conflicts
+    private var coins: Int = 0
+    
+    // MARK: - Nested Classes
+    class LetterSlotCell: UICollectionViewCell {
+        let letterLabel: UILabel = {
+            let label = UILabel()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.textAlignment = .center
+            label.font = UIFont.boldSystemFont(ofSize: 18)
+            return label
+        }()
+        
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            contentView.addSubview(letterLabel)
+            setupConstraints()
+            setupStyle()
+        }
+        
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            contentView.addSubview(letterLabel)
+            setupConstraints()
+            setupStyle()
+        }
+        
+        private func setupConstraints() {
+            NSLayoutConstraint.activate([
+                letterLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
+                letterLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -5),
+                letterLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
+                letterLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5)
+            ])
+        }
+        
+        private func setupStyle() {
+            layer.cornerRadius = 8
+            layer.borderWidth = 0
+            layer.masksToBounds = true
+            contentView.layer.masksToBounds = true
+        }
+        
+        func configure(with letter: String, state: LetterTileState) {
+            letterLabel.text = letter
+            if letter.isEmpty {
+                layer.borderWidth = 0
+                contentView.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+                letterLabel.textColor = .white
+            } else {
+                layer.borderWidth = 0
+                switch state {
+                case .normal:
+                    contentView.backgroundColor = .white
+                    letterLabel.textColor = .black
+                case .selected:
+                    contentView.backgroundColor = UIColor.lightGray
+                    letterLabel.textColor = .black
+                case .correct:
+                    contentView.backgroundColor = .green
+                    letterLabel.textColor = .white
+                case .incorrect:
+                    contentView.backgroundColor = .red
+                    letterLabel.textColor = .black
+                case .hint:
+                    // Blue for hinted letters
+                    contentView.backgroundColor = .blue
+                    letterLabel.textColor = .white
+                }
+            }
+        }
+    }
+    
+    class KeyboardCell: UICollectionViewCell {
+        let letterLabel: UILabel = {
+            let label = UILabel()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.textAlignment = .center
+            label.font = UIFont.boldSystemFont(ofSize: 18)
+            return label
+        }()
+        
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            contentView.addSubview(letterLabel)
+            setupConstraints()
+            setupStyle()
+        }
+        
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            contentView.addSubview(letterLabel)
+            setupConstraints()
+            setupStyle()
+        }
+        
+        private func setupConstraints() {
+            NSLayoutConstraint.activate([
+                letterLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
+                letterLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -5),
+                letterLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 5),
+                letterLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5)
+            ])
+        }
+        
+        private func setupStyle() {
+            layer.cornerRadius = 8
+            layer.borderWidth = 0
+            layer.masksToBounds = true
+        }
+        
+        func configure(with tile: LetterTile) {
+            contentView.backgroundColor = tile.isUsed ? UIColor.lightGray : UIColor.white
+            letterLabel.text = tile.letter
+            letterLabel.textColor = tile.isUsed ? UIColor.darkGray : UIColor.black
+        }
+    }
+    
+    // MARK: - Structs/Enums
+    struct LetterTile {
+        let letter: String
+        var isUsed: Bool = false
+    }
+    
+    enum LetterTileState {
+        case normal
+        case selected
+        case correct
+        case incorrect
+        case hint
+    }
+    
+    // MARK: - UI Setup Helpers
+    class UIComponents {
+        static func setupLetterCollectionView() -> UICollectionView {
+            let layout = UICollectionViewFlowLayout()
+            layout.scrollDirection = .horizontal
+            layout.minimumInteritemSpacing = 5.0
+            let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+            collectionView.register(GameBoardManager.LetterSlotCell.self, forCellWithReuseIdentifier: "LetterSlotCell")
+            collectionView.isScrollEnabled = false
+            collectionView.backgroundColor = .clear
+            return collectionView
+        }
+        
+        static func setupKeyboardCollectionView() -> UICollectionView {
+            let layout = UICollectionViewFlowLayout()
+            layout.scrollDirection = .vertical
+            layout.minimumInteritemSpacing = 5.0
+            let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+            collectionView.register(GameBoardManager.KeyboardCell.self, forCellWithReuseIdentifier: "KeyboardCell")
+            return collectionView
+        }
+    }
+    
+    // MARK: - Word Constraints
+    private let minWordLength = 3
+    private let maxWordLength = 20
+    private let maxStockLetters = 21
+    
+    // MARK: - Init
+    init(targetWord: String, extraLetters: [String], collectionView: UICollectionView) {
+        self.collectionView = collectionView
+        setupLevel(targetWord: targetWord, extraLetters: extraLetters)
+    }
+    
+    private func setupLevel(targetWord: String, extraLetters: [String]) {
+        guard targetWord.count >= minWordLength && targetWord.count <= maxWordLength else {
+            print("Invalid word length for targetWord: \(targetWord.count)")
+            return
+        }
+        
+        originalTargetWord = targetWord.uppercased()
+        currentGuess = Array(repeating: nil, count: originalTargetWord.count)
+        guessMapping = Array(repeating: nil, count: originalTargetWord.count)
+        frozenSlots.removeAll()
+        
+        var stock = originalTargetWord.map { String($0) }
+        let extraNeeded = maxStockLetters - stock.count
+        if extraNeeded > 0, !extraLetters.isEmpty {
+            let extra = extraLetters.shuffled().prefix(extraNeeded)
+            stock.append(contentsOf: extra)
+        }
+        availableLetters = stock.shuffled().map { LetterTile(letter: $0.uppercased()) }
+        initialAvailableLetters = availableLetters
+        
+        collectionView?.reloadData()
+    }
+    
+    // MARK: - Insert/Remove Letters
+    func insertLetter(at tileIndex: Int, into slotIndex: Int) -> Bool {
+        guard let collectionView = collectionView,
+              slotIndex >= 0 && slotIndex < currentGuess.count,
+              availableLetters.indices.contains(tileIndex),
+              !availableLetters[tileIndex].isUsed,
+              currentGuess[slotIndex] == nil
+        else {
+            return false
+        }
+        
+        // Mark letter as used
+        var tile = availableLetters[tileIndex]
+        tile.isUsed = true
+        availableLetters[tileIndex] = tile
+        
+        // Place in guess
+        currentGuess[slotIndex] = tile.letter
+        guessMapping[slotIndex] = tileIndex
+        
+        // Reload just this slot cell
+        collectionView.reloadItems(at: [IndexPath(item: slotIndex, section: 0)])
+        
+        // Check if guess is fully filled now
+        if !currentGuess.contains(where: { $0 == nil }) {
+            if checkWin() {
+                // Win case
+                if let vc = findGameViewController() {
+                    vc.handleWin()
+                }
+            } else {
+                // Wrong guess case
+                collectionView.reloadData()
+                if let vc = findGameViewController() {
+                    Animations.animateError(for: vc.letterCollectionView.visibleCells) {
+                        // Remain red until a letter is removed
+                    }
+                }
+            }
+        }
+        
+        return true
+    }
+    
+    func removeLetter(from slotIndex: Int) {
+        // If the slot is frozen (hint letter), don’t allow removal.
+        if frozenSlots.contains(slotIndex) {
+            return
+        }
+        
+        guard let collectionView = collectionView,
+              slotIndex >= 0 && slotIndex < currentGuess.count,
+              currentGuess[slotIndex] != nil,
+              let tileIndex = guessMapping[slotIndex] else {
+            return
+        }
+        
+        // Free up the tile
+        currentGuess[slotIndex] = nil
+        guessMapping[slotIndex] = nil
+        var tile = availableLetters[tileIndex]
+        tile.isUsed = false
+        availableLetters[tileIndex] = tile
+        
+        // Animate the slot cell back to empty
+        if let cell = collectionView.cellForItem(at: IndexPath(item: slotIndex, section: 0)) as? LetterSlotCell {
+            UIView.animate(withDuration: 0.3) {
+                cell.contentView.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+                cell.letterLabel.text = ""
+            } completion: { _ in
+                cell.configure(with: "", state: .normal)
+                cell.layer.borderWidth = 0
+                cell.contentView.layer.masksToBounds = true
+            }
+        }
+        collectionView.reloadItems(at: [IndexPath(item: slotIndex, section: 0)])
+        collectionView.reloadData()
+        
+        // Revert all filled slots to normal (white) since guess is no longer "complete".
+        revertAllFilledSlotsToNormal()
+    }
+    
+    private func revertAllFilledSlotsToNormal() {
+        guard let cv = collectionView else { return }
+        for index in 0..<currentGuess.count {
+            // If the slot is still frozen (hint), keep it blue
+            if frozenSlots.contains(index) { continue }
+            if let letter = currentGuess[index], !letter.isEmpty {
+                if let cell = cv.cellForItem(at: IndexPath(item: index, section: 0)) as? LetterSlotCell {
+                    cell.contentView.backgroundColor = .white
+                    cell.letterLabel.textColor = .black
+                }
+            }
+        }
+    }
+    
+    // MARK: - Win Check
+    func checkWin() -> Bool {
+        guard !currentGuess.contains(where: { $0 == nil }) else { return false }
+        return currentGuess.compactMap { $0 }.joined() == originalTargetWord
+    }
+    
+    // We removed the old `useHint()` approach to avoid confusion.
+    
+    // MARK: - Reset
+    func resetCurrentGuess() {
+        guard let collectionView = collectionView else { return }
+        currentGuess = Array(repeating: nil, count: originalTargetWord.count)
+        guessMapping = Array(repeating: nil, count: originalTargetWord.count)
+        frozenSlots.removeAll()
+        
+        availableLetters = initialAvailableLetters
+        for i in 0..<availableLetters.count {
+            var tile = availableLetters[i]
+            tile.isUsed = false
+            availableLetters[i] = tile
+        }
+        
+        collectionView.reloadData()
+    }
+    
+    // Attempt to find the GameViewController to run animations
+    private func findGameViewController() -> GameViewController? {
+        return collectionView?.window?.rootViewController?
+            .presentedViewController as? GameViewController
+    }
+    
+    // ---------------------------------
+    // MARK: - Accessors
+    // ---------------------------------
+    func getTileIndexForSlot(_ slotIndex: Int) -> Int? {
+        return guessMapping[slotIndex]
+    }
+    
+    var targetLetters: [String] {
+        return originalTargetWord.map { String($0) }
+    }
+    
+    var currentGuessState: [String?] {
+        return currentGuess
+    }
+    
+    var availableLettersState: [LetterTile] {
+        return availableLetters
+    }
+    
+    var coinCount: Int {
+        return coins
+    }
+    
+    // We allow the outside to register cells
+    func registerCells(for collectionView: UICollectionView) {
+        collectionView.register(LetterSlotCell.self, forCellWithReuseIdentifier: "LetterSlotCell")
+        collectionView.register(KeyboardCell.self, forCellWithReuseIdentifier: "KeyboardCell")
+    }
+    
+    func markTileAsUsed(at tileIndex: Int) {
+        guard availableLetters.indices.contains(tileIndex) else { return }
+        var tile = availableLetters[tileIndex]
+        tile.isUsed = true
+        availableLetters[tileIndex] = tile
+    }
+    
+    // ---------------------------------
+    // MARK: - NEW: Helper Methods
+    // ---------------------------------
+    func setCoinCount(_ newCount: Int) {
+        coins = newCount
+    }
+    
+    // This method carefully restores guess & usage states (plus we handle duplicates more robustly).
+    func restoreGuess(_ guess: [String?], restoredAvailableLetters: [LetterTile]) {
+        guard guess.count == currentGuess.count,
+              restoredAvailableLetters.count == availableLetters.count
+        else { return }
+        
+        // Clear out any previously frozen slots
+        frozenSlots.removeAll()
+        
+        // 1) Restore usage for each letter
+        for i in 0..<availableLetters.count {
+            availableLetters[i].isUsed = restoredAvailableLetters[i].isUsed
+        }
+        
+        // 2) Build guessMapping carefully
+        guessMapping = Array(repeating: nil, count: currentGuess.count)
+        currentGuess = Array(repeating: nil, count: currentGuess.count)
+        
+        var usedTileIndices = Set<Int>()
+        
+        for (slotIndex, letterOpt) in guess.enumerated() {
+            guard let letter = letterOpt else {
+                // If nil, slot is empty
+                currentGuess[slotIndex] = nil
+                continue
+            }
+            
+            // Try to find a matching tile that is used, not yet assigned
+            if let match = availableLetters.enumerated().first(where: { (idx, tile) in
+                tile.letter == letter && tile.isUsed && !usedTileIndices.contains(idx)
+            }) {
+                let matchedIndex = match.0
+                guessMapping[slotIndex] = matchedIndex
+                usedTileIndices.insert(matchedIndex)
+                currentGuess[slotIndex] = letter
+            } else {
+                // If we can't find a match, we just log an error
+                print("Restore guess error: Can't match letter \(letter) in puzzle stock.")
+            }
+        }
+        
+        // Then reload UI
+        collectionView?.reloadData()
+    }
+}
+
+
+// MARK: - Extended Hint Methods
+extension GameBoardManager {
+    
+    /// Remove `count` letters from the keyboard stock that are definitely NOT in the solution.
+    /// Returns true if successful, false if not enough removable letters remain.
+    func removeIncorrectLetters(count: Int) -> Bool {
+        let solutionFrequencies = frequencyMap(for: originalTargetWord)
+        var removableIndices: [Int] = []
+        
+        for (index, tile) in availableLetters.enumerated() {
+            if tile.isUsed { continue }
+            
+            // If tile not in solution => removable
+            if !solutionFrequencies.keys.contains(tile.letter) {
+                removableIndices.append(index)
+                continue
+            }
+            
+            // Or if tile is "excess" beyond needed frequency
+            let letterNeededCount = solutionFrequencies[tile.letter] ?? 0
+            let letterCountInStock = availableLetters.filter {
+                $0.letter == tile.letter && !$0.isUsed
+            }.count
+            if letterCountInStock > letterNeededCount {
+                removableIndices.append(index)
+            }
+        }
+        
+        if removableIndices.count < count {
+            return false
+        }
+        
+        removableIndices.shuffle()
+        let chosenIndices = removableIndices.prefix(count)
+        
+        // Mark those letters as used
+        for idx in chosenIndices {
+            var tile = availableLetters[idx]
+            tile.isUsed = true
+            availableLetters[idx] = tile
+        }
+        
+        collectionView?.reloadData()
+        
+        // After removing letters, check if we won by some chance (rare, but just in case).
+        if checkWin() {
+            if let vc = findGameViewController() {
+                vc.handleWin()
+            }
+        }
+        
+        return true
+    }
+    
+    /// Reveal `count` letters in empty slots. Freeze them (cannot be removed) and color them blue.
+    /// Returns the number of letters actually revealed.
+    func revealLetters(count: Int) -> Int {
+        let emptySlots = currentGuess.enumerated()
+            .compactMap { $1 == nil ? $0 : nil } // array of empty slot indices
+        
+        if emptySlots.isEmpty { return 0 }
+        
+        var revealedCount = 0
+        
+        for slotIndex in emptySlots.prefix(count) {
+            let correctLetter = String(
+                originalTargetWord[originalTargetWord.index(originalTargetWord.startIndex, offsetBy: slotIndex)]
+            )
+            
+            // Mark letter as used in the stock if possible
+            if let tileIndex = availableLetters.firstIndex(where: { !$0.isUsed && $0.letter == correctLetter }) {
+                var tile = availableLetters[tileIndex]
+                tile.isUsed = true
+                availableLetters[tileIndex] = tile
+                guessMapping[slotIndex] = tileIndex
+            }
+            
+            currentGuess[slotIndex] = correctLetter
+            
+            // Freeze the slot so user can’t remove it
+            frozenSlots.insert(slotIndex)
+            
+            // Mark slot as hint (blue)
+            if let cell = collectionView?.cellForItem(at: IndexPath(item: slotIndex, section: 0)) as? LetterSlotCell {
+                cell.configure(with: correctLetter, state: .hint)
+            }
+            
+            revealedCount += 1
+        }
+        
+        // Refresh the board
+        collectionView?.reloadData()
+        
+        // Check for a win now that letters were revealed
+        if checkWin() {
+            if let vc = findGameViewController() {
+                vc.handleWin()
+            }
+        }
+        
+        return revealedCount
+    }
+    
+    // MARK: - Helper: Frequency map
+    private func frequencyMap(for word: String) -> [String: Int] {
+        var freq: [String: Int] = [:]
+        for char in word {
+            let letter = String(char)
+            freq[letter, default: 0] += 1
+        }
+        return freq
+    }
+}
+
+
+// GameToolbarView.swift
+
+import UIKit
+
+class GameToolbarView: UIView {
+    
+    let stackView = UIStackView()
+    let buttonSize: CGFloat = 40
+    let spacing: CGFloat = 10
+    
+    // Closure properties for button actions
+    var onBackTapped: (() -> Void)?
+    var onHintTapped: (() -> Void)?
+    var onLevelTapped: (() -> Void)?
+    var onCoinsTapped: (() -> Void)?
+    var onGiftTapped: (() -> Void)?
+    var onNextTapped: (() -> Void)?
+    
+    // MARK: - Initializers
+    init() {
+        super.init(frame: .zero)
+        setupToolbar()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupToolbar()
+    }
+    
+    // MARK: - Setup Toolbar
+    private func setupToolbar() {
+        backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        translatesAutoresizingMaskIntoConstraints = false
+        
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.distribution = .equalSpacing
+        stackView.spacing = spacing
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        addSubview(stackView)
+        
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: self.leadingAnchor, constant: 16),
+            stackView.trailingAnchor.constraint(equalTo: self.trailingAnchor, constant: -16),
+            stackView.topAnchor.constraint(equalTo: self.topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: self.bottomAnchor)
+        ])
+        
+        // Create buttons with tailored icon and background colors
+        let backButton = createButton(
+            systemName: "chevron.backward",
+            tintColor: .systemPurple,
+            backgroundColor: UIColor.systemPurple.withAlphaComponent(0.2)
+        ) { [weak self] in
+            self?.onBackTapped?()
+        }
+        let hintButton = createButton(
+            systemName: "wand.and.stars",
+            tintColor: .systemYellow,
+            backgroundColor: UIColor.systemYellow.withAlphaComponent(0.2)
+        ) { [weak self] in
+            self?.onHintTapped?()
+        }
+        let levelButton = createButton(
+            systemName: "trophy",
+            tintColor: .systemCyan,
+            backgroundColor: UIColor.systemCyan.withAlphaComponent(0.2)
+        ) { [weak self] in
+            self?.onLevelTapped?()
+        }
+        let coinButton = createButton(
+            systemName: "centsign.circle",
+            tintColor: .systemMint,
+            backgroundColor: UIColor.systemMint.withAlphaComponent(0.2)
+        ) { [weak self] in
+            self?.onCoinsTapped?()
+        }
+        let giftButton = createButton(
+            systemName: "giftcard",
+            tintColor: .systemPink,
+            backgroundColor: UIColor.systemPink.withAlphaComponent(0.2)
+        ) { [weak self] in
+            self?.onGiftTapped?()
+        }
+        let nextButton = createButton(
+            systemName: "chevron.forward.circle",
+            tintColor: .systemOrange,
+            backgroundColor: UIColor.systemOrange.withAlphaComponent(0.2)
+        ) { [weak self] in
+            self?.onNextTapped?()
+        }
+        
+        [backButton, hintButton, levelButton, coinButton, giftButton, nextButton].forEach {
+            stackView.addArrangedSubview($0)
+        }
+    }
+    
+    private func createButton(systemName: String,
+                              tintColor: UIColor,
+                              backgroundColor: UIColor,
+                              action: @escaping () -> Void) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: systemName)?.withRenderingMode(.alwaysOriginal), for: .normal)
+        button.tintColor = tintColor
+        button.backgroundColor = backgroundColor // Use the passed background color
+        button.layer.cornerRadius = 8
+        button.clipsToBounds = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: buttonSize),
+            button.heightAnchor.constraint(equalToConstant: buttonSize)
+        ])
+        
+        button.addAction(UIAction(handler: { _ in action() }), for: .touchUpInside)
+        return button
+    }
+}
+
+
+//
+//  GameViewController.swift
+//  Chef Quiz - 2025 iOS
+//
+
+import UIKit
+import StoreKit
+
+class GameViewController: UIViewController {
+    
+    // MARK: - UI Elements
+    let imageView = UIImageView()
+    let backgroundView = UIView()
+    let letterCollectionView = GameBoardManager.UIComponents.setupLetterCollectionView()
+    let keyboardCollectionView = GameBoardManager.UIComponents.setupKeyboardCollectionView()
+    
+    lazy var toolbar: GameToolbarView = {
+        let toolbar = GameToolbarView()
+        toolbar.onBackTapped = { [weak self] in self?.backTapped() }
+        toolbar.onHintTapped = { [weak self] in self?.useHint() }
+        toolbar.onLevelTapped = { [weak self] in self?.levelTapped() }
+        toolbar.onCoinsTapped = { [weak self] in self?.coinsTapped() }
+        toolbar.onGiftTapped = { [weak self] in self?.giftTapped() }
+        toolbar.onNextTapped = { [weak self] in self?.nextTapped() }
+        return toolbar
+    }()
+    
+    var letterCollectionHeightConstraint: NSLayoutConstraint!
+    var keyboardCollectionHeightConstraint: NSLayoutConstraint!
+    
+    // MARK: - View Model and Board Manager
+    let viewModel = GameViewModel()
+    private var gameBoardManager: GameBoardManager!
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+    
+    override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
+        super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
+
+    }
+    
+    // MARK: - Lifecycle
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        // 1) Load levels & restore state
+        viewModel.loadLevels(for: "en")
+        viewModel.loadCurrentLevel(with: letterCollectionView)
+        
+        guard let gameBoardManager = viewModel.gameBoardManager else {
+            fatalError("GameBoardManager not initialized after loadCurrentLevel()")
+        }
+        self.gameBoardManager = gameBoardManager
+        
+        // 2) Set puzzle image
+        if let imageName = viewModel.currentLevelImage?.lowercased() {
+            print("Attempting to load image: \(imageName)")
+            imageView.image = UIImage(named: imageName) ?? UIImage(named: "placeholder")
+        } else {
+            print("No current level image available")
+            imageView.image = UIImage(named: "placeholder")
+        }
+        
+        // 3) Setup UI
+        setupUI()
+        setupGestures()
+        updateUI()
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateTargetZoneLayout()
+        updateKeyboardLayout()
+    }
+    
+    // MARK: - UI Update
+    func updateUI() {
+        letterCollectionView.reloadData()
+        keyboardCollectionView.reloadData()
+    }
+    
+    // MARK: - Layout Methods
+    func updateTargetZoneLayout() {
+        let letterCount = viewModel.targetLetters.count
+        let layout = createTargetZoneLayout(forLetterCount: letterCount)
+        letterCollectionView.setCollectionViewLayout(layout, animated: false)
+    }
+    
+    func createTargetZoneLayout(forLetterCount count: Int) -> UICollectionViewCompositionalLayout {
+        return UICollectionViewCompositionalLayout { (sectionIndex, environment) -> NSCollectionLayoutSection? in
+            let sideInsets: CGFloat = 20
+            let availableWidth = environment.container.effectiveContentSize.width - 2 * sideInsets
+            let interItemSpacing: CGFloat = 5.0
+            let totalSpacing = interItemSpacing * CGFloat(max(count - 1, 0))
+            let itemWidth = min((availableWidth - totalSpacing) / CGFloat(count), 50)
+            let itemSize = NSCollectionLayoutSize(widthDimension: .absolute(itemWidth),
+                                                  heightDimension: .absolute(itemWidth))
+            let item = NSCollectionLayoutItem(layoutSize: itemSize)
+            let groupSize = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0),
+                                                   heightDimension: .absolute(itemWidth))
+            let subitems = Array(repeating: item, count: count)
+            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: subitems)
+            group.interItemSpacing = .fixed(interItemSpacing)
+            let section = NSCollectionLayoutSection(group: group)
+            section.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: sideInsets, bottom: 10, trailing: sideInsets)
+            section.orthogonalScrollingBehavior = .continuous
+            return section
+        }
+    }
+    
+    func updateKeyboardLayout() {
+        let rows = 3
+        let cols = 7
+        let spacing: CGFloat = 5.0
+        
+        let availableWidth = keyboardCollectionView.bounds.width
+        guard availableWidth > 0 else { return }
+        
+        let totalHorizontalSpacing = CGFloat(cols - 1) * spacing
+        let cellWidth = (availableWidth - totalHorizontalSpacing) / CGFloat(cols)
+        let totalKeyboardHeight = CGFloat(rows) * cellWidth + CGFloat(rows - 1) * spacing
+        
+        if let layout = keyboardCollectionView.collectionViewLayout as? UICollectionViewFlowLayout {
+            layout.scrollDirection = .vertical
+            layout.itemSize = CGSize(width: cellWidth, height: cellWidth)
+            layout.minimumInteritemSpacing = spacing
+            layout.minimumLineSpacing = spacing
+            layout.sectionInset = .zero
+            layout.invalidateLayout()
+        }
+        
+        keyboardCollectionHeightConstraint.constant = totalKeyboardHeight
+        keyboardCollectionView.reloadData()
+    }
+    
+    // MARK: - UI Setup
+    func setupUI() {
+        view.backgroundColor = UIColor(red: 0.2, green: 0.6, blue: 0.2, alpha: 1.0)
+        view.addSubview(imageView)
+        view.addSubview(backgroundView)
+        view.addSubview(toolbar)
+        backgroundView.addSubview(letterCollectionView)
+        backgroundView.addSubview(keyboardCollectionView)
+        
+        imageView.contentMode = .scaleAspectFill
+        imageView.backgroundColor = .gray
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        
+        backgroundView.backgroundColor = UIColor(red: 0.3, green: 0.7, blue: 0.3, alpha: 0.9)
+        backgroundView.translatesAutoresizingMaskIntoConstraints = false
+        
+        gameBoardManager.registerCells(for: letterCollectionView)
+        gameBoardManager.registerCells(for: keyboardCollectionView)
+        
+        letterCollectionView.dataSource = self
+        letterCollectionView.delegate = self
+        letterCollectionView.backgroundColor = .clear
+        letterCollectionView.translatesAutoresizingMaskIntoConstraints = false
+        
+        keyboardCollectionView.dataSource = self
+        keyboardCollectionView.delegate = self
+        keyboardCollectionView.backgroundColor = backgroundView.backgroundColor
+        keyboardCollectionView.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageView.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.55),
+            
+            backgroundView.topAnchor.constraint(equalTo: imageView.bottomAnchor),
+            backgroundView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backgroundView.bottomAnchor.constraint(equalTo: toolbar.topAnchor),
+            
+            toolbar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            toolbar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            toolbar.heightAnchor.constraint(equalToConstant: 60),
+            
+            letterCollectionView.topAnchor.constraint(equalTo: backgroundView.topAnchor, constant: 20),
+            letterCollectionView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor, constant: 20),
+            letterCollectionView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor, constant: -20)
+        ])
+        
+        letterCollectionHeightConstraint = letterCollectionView.heightAnchor.constraint(equalToConstant: 50)
+        letterCollectionHeightConstraint.priority = UILayoutPriority(999)
+        letterCollectionHeightConstraint.isActive = true
+        
+        NSLayoutConstraint.activate([
+            keyboardCollectionView.topAnchor.constraint(equalTo: letterCollectionView.bottomAnchor, constant: 20),
+            keyboardCollectionView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor, constant: 20),
+            keyboardCollectionView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor, constant: -20),
+            keyboardCollectionView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor, constant: -20)
+        ])
+        keyboardCollectionHeightConstraint = keyboardCollectionView.heightAnchor.constraint(equalToConstant: 120)
+        keyboardCollectionHeightConstraint.priority = UILayoutPriority(999)
+        keyboardCollectionHeightConstraint.isActive = true
+        
+        updateUI()
+    }
+    
+    // MARK: - Gestures
+    func setupGestures() {
+        let letterTap = UITapGestureRecognizer(target: self, action: #selector(handleLetterTap(_:)))
+        letterCollectionView.addGestureRecognizer(letterTap)
+        
+        let keyboardTap = UITapGestureRecognizer(target: self, action: #selector(handleKeyboardTap(_:)))
+        keyboardCollectionView.addGestureRecognizer(keyboardTap)
+    }
+    
+    @objc func handleLetterTap(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: letterCollectionView)
+        guard let indexPath = letterCollectionView.indexPathForItem(at: point) else { return }
+        let slotIndex = indexPath.item
+        
+        // If that slot is "frozen" (a revealed/hint letter), skip removal
+        if viewModel.isSlotFrozen(slotIndex) {
+            return
+        }
+        
+        // If that slot has a letter, remove it
+        if let removedLetter = viewModel.currentGuess[slotIndex], !removedLetter.isEmpty {
+            if let tileIndex = viewModel.getTileIndexForSlot(slotIndex) {
+                viewModel.removeLetterFromSlot(slotIndex)
+                
+                // Reload the keyboard tile so it appears "unused"
+                let kbIndexPath = IndexPath(item: tileIndex, section: 0)
+                keyboardCollectionView.reloadItems(at: [kbIndexPath])
+                
+                // Also reload the slot itself
+                letterCollectionView.reloadItems(at: [indexPath])
+            }
+        }
+    }
+    
+    @objc func handleKeyboardTap(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: keyboardCollectionView)
+        guard let keyboardIndexPath = keyboardCollectionView.indexPathForItem(at: point) else { return }
+        
+        let tileIndex = keyboardIndexPath.item
+        let tile = viewModel.availableLetters[tileIndex]
+        guard !tile.isUsed else { return }
+        
+        // Find first empty slot
+        guard let targetIndex = viewModel.currentGuess.firstIndex(where: { $0 == nil }) else { return }
+        
+        // Animate letter from keyboard to slot
+        guard let keyboardCell = keyboardCollectionView.cellForItem(at: keyboardIndexPath) else { return }
+        let targetIndexPath = IndexPath(item: targetIndex, section: 0)
+        letterCollectionView.layoutIfNeeded()
+        guard let targetCell = letterCollectionView.cellForItem(at: targetIndexPath) as? GameBoardManager.LetterSlotCell else { return }
+        let targetFrame = letterCollectionView.convert(targetCell.frame, to: view)
+        
+        guard let snapshot = keyboardCell.snapshotView(afterScreenUpdates: false) else { return }
+        snapshot.frame = keyboardCollectionView.convert(keyboardCell.frame, to: view)
+        view.addSubview(snapshot)
+        
+        UIView.animate(withDuration: 0.3, animations: {
+            snapshot.frame = targetFrame
+        }) { _ in
+            snapshot.removeFromSuperview()
+            _ = self.viewModel.insertLetterAtExactIndex(tileIndex, intoSlot: targetIndex)
+            targetCell.configure(with: self.viewModel.currentGuess[targetIndex] ?? "", state: .normal)
+            self.keyboardCollectionView.performBatchUpdates({
+                self.keyboardCollectionView.reloadItems(at: [keyboardIndexPath])
+            }, completion: nil)
+            self.letterCollectionView.performBatchUpdates({
+                self.letterCollectionView.reloadItems(at: [targetIndexPath])
+            }, completion: nil)
+        }
+    }
+    
+    // MARK: - Toolbar Actions
+    func backTapped() {
+        dismiss(animated: true)
+    }
+    
+    func useHint() {
+        // Shows the hint modal
+        let hintModal = HintModalViewController(gameViewController: self)
+        hintModal.modalPresentationStyle = .formSheet
+        present(hintModal, animated: true)
+    }
+    
+    func levelTapped() {
+        let achievementModal = AchievementModalViewController(viewModel: viewModel)
+        achievementModal.modalPresentationStyle = .formSheet
+        present(achievementModal, animated: true)
+    }
+    
+    func coinsTapped() {
+        let coinModal = CoinModalViewController(coinCount: viewModel.coins, viewModel: viewModel)
+        coinModal.modalPresentationStyle = .formSheet
+        present(coinModal, animated: true)
+    }
+    
+    func giftTapped() {
+        let giftModal = GiftModalViewController(gameViewController: self)
+        giftModal.modalPresentationStyle = .formSheet
+        present(giftModal, animated: true)
+    }
+    
+    func nextTapped() {
+        let nextLevelModal = NextLevelModalViewController(gameViewController: self)
+        nextLevelModal.modalPresentationStyle = .formSheet
+        present(nextLevelModal, animated: true)
+    }
+    
+    // MARK: - Handle Win Logic
+    func handleWin() {
+        letterCollectionView.isUserInteractionEnabled = false
+        keyboardCollectionView.isUserInteractionEnabled = false
+        
+        let letterCells = letterCollectionView.visibleCells
+        Animations.animateWin(for: letterCells) { [weak self] in
+            self?.presentWinModal()
+        }
+    }
+    
+    private func presentWinModal() {
+        let completedLevel = viewModel.completedLevel
+        let coinsEarned = 50
+        let winModal = WinModalViewController(
+            completedLevel: completedLevel,
+            coinsEarned: coinsEarned,
+            gameViewController: self
+        )
+        winModal.modalPresentationStyle = .overFullScreen
+        winModal.modalTransitionStyle = .crossDissolve
+        present(winModal, animated: true)
+    }
+    
+    public func goToNextLevel() {
+        viewModel.advanceToNextLevel()
+        viewModel.loadCurrentLevel(with: letterCollectionView)
+        
+        guard let gameBoardManager = viewModel.gameBoardManager else { return }
+        self.gameBoardManager = gameBoardManager
+        
+        letterCollectionView.isUserInteractionEnabled = true
+        keyboardCollectionView.isUserInteractionEnabled = true
+        
+        updateUI()
+    }
+}
+
+// MARK: - UICollectionViewDataSource & Delegate
+extension GameViewController: UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
+    func numberOfSections(in collectionView: UICollectionView) -> Int { return 1 }
+    
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        if collectionView == letterCollectionView {
+            return viewModel.targetLetters.count
+        } else {
+            return viewModel.availableLetters.count
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView,
+                        cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        
+        if collectionView == letterCollectionView {
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "LetterSlotCell", for: indexPath) as! GameBoardManager.LetterSlotCell
+            let displayChar = viewModel.currentGuess[indexPath.item] ?? ""
+            
+            // Determine cell state
+            if viewModel.isSlotFrozen(indexPath.item) {
+                // Mark it as .hint (blue, not removable)
+                cell.configure(with: displayChar, state: .hint)
+            }
+            else {
+                // If puzzle is fully filled and not a win => .incorrect
+                if !viewModel.currentGuess.contains(where: { $0 == nil }) && !viewModel.checkWin() {
+                    cell.configure(with: displayChar, state: .incorrect)
+                } else {
+                    cell.configure(with: displayChar, state: .normal)
+                }
+            }
+            
+            return cell
+        } else {
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "KeyboardCell", for: indexPath) as! GameBoardManager.KeyboardCell
+            let tile = viewModel.availableLetters[indexPath.item]
+            cell.configure(with: tile)
+            return cell
+        }
+    }
+}
+
+
+//
+//  GameViewModel.swift
+//  Chef Quiz - 2025 iOS
+//
+//  Created by Benjamin Gievis on 05/03/2025.
+//
+
+import UIKit
+
+class GameViewModel {
+    private(set) var gameBoardManager: GameBoardManager?
+    private var levels: [Level] = []
+    private var currentLevelIndex = 0
+    
+    // We'll store a "restoredState" here after loading from UserDefaults
+    private var restoredState: PersistedGameState?
+    
+    var coins: Int {
+        return gameBoardManager?.coinCount ?? 0
+    }
+    
+    var currentGuess: [String?] {
+        return gameBoardManager?.currentGuessState ?? []
+    }
+    
+    var availableLetters: [GameBoardManager.LetterTile] {
+        return gameBoardManager?.availableLettersState ?? []
+    }
+    
+    var targetLetters: [String] {
+        return gameBoardManager?.targetLetters ?? []
+    }
+    
+    // The “completedLevel” property returns the human-friendly level number
+    var completedLevel: Int {
+        return currentLevelIndex + 1
+    }
+    
+    var currentLevelImage: String? {
+        return levels[safe: currentLevelIndex]?.image
+    }
+    
+    // MARK: - Loading Levels
+    func loadLevels(for language: String = "en") {
+        if let loadedLevels = LevelData.load(for: language) {
+            levels = loadedLevels
+        } else {
+            print("Failed to load levels")
+        }
+        
+        loadGameState()
+        
+        if currentLevelIndex >= levels.count {
+            currentLevelIndex = max(levels.count - 1, 0)
+        }
+    }
+    
+    // MARK: - Loading Current Level
+    func loadCurrentLevel(with collectionView: UICollectionView) {
+        guard currentLevelIndex < levels.count else {
+            print("No more levels available!")
+            return
+        }
+        
+        let level = levels[currentLevelIndex]
+        print("Loading level \(level.word) with image \(level.image)")
+        
+        gameBoardManager = GameBoardManager(
+            targetWord: level.word,
+            extraLetters: level.extraLetters,
+            collectionView: collectionView
+        )
+        
+        // If we had a saved puzzle state that matches this level's word, restore it
+        if let restored = restoredState {
+            if restored.targetWord.uppercased() == level.word.uppercased() {
+                gameBoardManager?.setCoinCount(restored.coinCount)
+                gameBoardManager?.restoreGuess(
+                    restored.currentGuess,
+                    restoredAvailableLetters: restored.availableLetters.map {
+                        GameBoardManager.LetterTile(letter: $0.letter, isUsed: $0.isUsed)
+                    }
+                )
+                print("Restored puzzle state for level: \(level.word)")
+            } else {
+                print("Saved puzzle doesn't match current level's word—starting fresh.")
+            }
+            restoredState = nil
+        }
+    }
+    
+    // MARK: - Basic Puzzle Mechanics
+    func insertLetterAtExactIndex(_ tileIndex: Int, intoSlot slotIndex: Int) -> Bool {
+        return gameBoardManager?.insertLetter(at: tileIndex, into: slotIndex) ?? false
+    }
+    
+    func removeLetterFromSlot(_ slotIndex: Int) {
+        gameBoardManager?.removeLetter(from: slotIndex)
+    }
+    
+    func getTileIndexForSlot(_ slotIndex: Int) -> Int? {
+        return gameBoardManager?.getTileIndexForSlot(slotIndex)
+    }
+    
+    func checkWin() -> Bool {
+        return gameBoardManager?.checkWin() ?? false
+    }
+    
+    func resetCurrentGuess() {
+        gameBoardManager?.resetCurrentGuess()
+    }
+    
+    // Expose whether a given slot is frozen
+    func isSlotFrozen(_ slotIndex: Int) -> Bool {
+        return gameBoardManager?.frozenSlots.contains(slotIndex) ?? false
+    }
+    
+    // MARK: - Level Progression
+    func advanceToNextLevel() {
+        currentLevelIndex += 1
+        if currentLevelIndex >= levels.count {
+            currentLevelIndex = max(levels.count - 1, 0)
+            print("Reached final level or no levels remain.")
+        }
+        saveGameState()
+    }
+    
+    // MARK: - PersistedGameState (Local Storage)
+    private struct PersistedGameState: Codable {
+        var currentLevelIndex: Int
+        var coinCount: Int
+        var targetWord: String
+        var currentGuess: [String?]
+        var availableLetters: [PersistedLetterTile]
+    }
+    
+    private struct PersistedLetterTile: Codable {
+        let letter: String
+        let isUsed: Bool
+    }
+    
+    func saveGameState() {
+        guard let manager = gameBoardManager else {
+            return
+        }
+        
+        let state = PersistedGameState(
+            currentLevelIndex: currentLevelIndex,
+            coinCount: manager.coinCount,
+            targetWord: manager.originalTargetWord,
+            currentGuess: manager.currentGuessState,
+            availableLetters: manager.availableLettersState.map {
+                PersistedLetterTile(letter: $0.letter, isUsed: $0.isUsed)
+            }
+        )
+        
+        do {
+            let data = try JSONEncoder().encode(state)
+            UserDefaults.standard.set(data, forKey: "ChefQuizGameState")
+            UserDefaults.standard.synchronize()
+        } catch {
+            print("Failed to save game state: \(error)")
+        }
+    }
+    
+    private func loadGameState() {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: "ChefQuizGameState") else {
+            return
+        }
+        
+        do {
+            let loadedState = try JSONDecoder().decode(PersistedGameState.self, from: data)
+            self.restoredState = loadedState
+            self.currentLevelIndex = loadedState.currentLevelIndex
+            print("Loaded game state for level: \(loadedState.currentLevelIndex)")
+        } catch {
+            print("Failed to load game state: \(error)")
+        }
+    }
+    
+    // MARK: - Hint Utility Methods (Advanced)
+    func tryRemoveIncorrectLetters(amount: Int, cost: Int) -> Bool {
+        guard let manager = gameBoardManager else { return false }
+        if manager.coinCount < cost { return false }
+        
+        let success = manager.removeIncorrectLetters(count: amount)
+        if success {
+            manager.setCoinCount(manager.coinCount - cost)
+        }
+        return success
+    }
+    
+    func tryRevealLetters(amount: Int, cost: Int) -> Bool {
+        guard let manager = gameBoardManager else { return false }
+        if manager.coinCount < cost { return false }
+        
+        let revealed = manager.revealLetters(count: amount)
+        if revealed > 0 {
+            manager.setCoinCount(manager.coinCount - cost)
+            return true
+        }
+        return false
+    }
+    
+    func trySkipLevel(cost: Int) -> Bool {
+        guard let manager = gameBoardManager else { return false }
+        if manager.coinCount < cost { return false }
+        
+        manager.setCoinCount(manager.coinCount - cost)
+        advanceToNextLevel()
+        return true
+    }
+    
+    // We can add a helper to award coins
+    func addCoins(_ amount: Int) {
+        guard let manager = gameBoardManager else { return }
+        manager.setCoinCount(manager.coinCount + amount)
+        saveGameState()
+    }
+    
+    // Helper checks for removing or revealing
+    func canRemoveIncorrectLetters(amount: Int) -> Bool {
+        guard let manager = gameBoardManager else { return false }
+        // We won't replicate the entire logic; a quick check is enough.
+        // Also check coin cost if you want. For example if cost is known:
+        return true
+    }
+    
+    func canRevealLetters(amount: Int) -> Bool {
+        guard let manager = gameBoardManager else { return false }
+        let emptySlots = manager.currentGuessState.filter { $0 == nil }.count
+        return emptySlots >= amount
+    }
+}
+
+// Safe subscript
+extension Collection {
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+// HintModalViewController.swift
+import UIKit
+
+class HintModalViewController: UIViewController {
+    
+    private weak var gameViewController: GameViewController?
+    
+    // Your hint array with cost
+    private let hints = [
+        ("remove-1-letter", "Remove 1 Letter", 30),
+        ("remove-2-letters", "Remove 2 Letters", 50),
+        ("reveal-1-letter", "Reveal 1 Letter", 50),
+        ("reveal-2-letters", "Reveal 2 Letters", 80),
+        ("skip-level", "Skip Level", 500)
+    ]
+    
+    // UI elements
+    private let wandIcon: UIImageView = {
+        let imageView = UIImageView(image: UIImage(systemName: "wand.and.stars"))
+        imageView.tintColor = .systemYellow
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+    
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Hints"
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    // Here’s your collection view for hints:
+    private let hintCollectionView: UICollectionView = {
+        let layout = UICollectionViewFlowLayout()
+        layout.scrollDirection = .vertical
+        layout.minimumInteritemSpacing = 10
+        layout.minimumLineSpacing = 10
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "HintCell")
+        collectionView.backgroundColor = .clear
+        return collectionView
+    }()
+    
+    private let dismissButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Close", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 18, weight: .medium)
+        button.setTitleColor(.white, for: .normal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+    
+    init(gameViewController: GameViewController) {
+        self.gameViewController = gameViewController
+        super.init(nibName: nil, bundle: nil)
+    }
+    
+    // Required init
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    // -------------------------------------
+    // MARK: - View Lifecycle
+    // -------------------------------------
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        
+        // 1) Assign dataSource & delegate
+        hintCollectionView.dataSource = self
+        hintCollectionView.delegate = self
+        
+        // 2) Optional: Add a tap gesture if you prefer tapping anywhere on the cell
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(hintTapped(_:)))
+        hintCollectionView.addGestureRecognizer(tapGesture)
+        
+        // 3) Dismiss button
+        dismissButton.addTarget(self, action: #selector(dismissTapped), for: .touchUpInside)
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = UIColor(red: 0.2, green: 0.2, blue: 0.3, alpha: 1.0)
+        
+        let stackView = UIStackView(arrangedSubviews: [wandIcon, titleLabel, hintCollectionView, dismissButton])
+        stackView.axis = .vertical
+        stackView.spacing = 20
+        stackView.alignment = .fill
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(stackView)
+        
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            stackView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            stackView.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+            stackView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20),
+            
+            wandIcon.widthAnchor.constraint(equalToConstant: 60),
+            wandIcon.heightAnchor.constraint(equalToConstant: 60)
+        ])
+    }
+    
+    @objc private func dismissTapped() {
+        dismiss(animated: true)
+    }
+    
+    // -------------------------------------
+    // MARK: - Tap Gesture Handling
+    // -------------------------------------
+    @objc private func hintTapped(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: hintCollectionView)
+        guard let indexPath = hintCollectionView.indexPathForItem(at: point) else { return }
+        
+        let (key, _, cost) = hints[indexPath.row]
+        guard let vm = gameViewController?.viewModel else { return }
+        
+        var success = false
+        
+        switch key {
+        case "remove-1-letter":
+            success = vm.tryRemoveIncorrectLetters(amount: 1, cost: cost)
+        case "remove-2-letters":
+            success = vm.tryRemoveIncorrectLetters(amount: 2, cost: cost)
+        case "reveal-1-letter":
+            success = vm.tryRevealLetters(amount: 1, cost: cost)
+        case "reveal-2-letters":
+            success = vm.tryRevealLetters(amount: 2, cost: cost)
+        case "skip-level":
+            success = vm.trySkipLevel(cost: cost)
+            if success {
+                dismiss(animated: true)
+                return
+            }
+        default:
+            break
+        }
+        
+        if success {
+            showHintUsedAnimation()
+            // Reload so it re-checks coin balance, availability, etc.
+            hintCollectionView.reloadData()
+        } else {
+            print("Hint usage failed or not enough coins.")
+        }
+    }
+    
+    private func showHintUsedAnimation() {
+        let label = UILabel()
+        label.text = "Hint Used!"
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.8)
+        label.textAlignment = .center
+        label.frame = CGRect(x: 0, y: 0, width: 120, height: 40)
+        label.center = view.center
+        label.layer.cornerRadius = 10
+        label.clipsToBounds = true
+        view.addSubview(label)
+        
+        UIView.animate(withDuration: 1.0, animations: {
+            label.alpha = 0
+        }) { _ in
+            label.removeFromSuperview()
+        }
+    }
+}
+
+// ---------------------------------------------------
+// MARK: - UICollectionViewDataSource & Delegate Flow
+// ---------------------------------------------------
+extension HintModalViewController: UICollectionViewDataSource, UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
+    
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        return hints.count
+    }
+    
+    func collectionView(_ collectionView: UICollectionView,
+                        cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "HintCell", for: indexPath)
+        
+        // Clear previous subviews if any
+        cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+        
+        let (key, title, cost) = hints[indexPath.row]
+        
+        // Quick label to display the hint title + cost
+        let label = UILabel(frame: cell.bounds)
+        label.text = "\(title) (\(cost))"
+        label.textAlignment = .center
+        label.textColor = .white
+        cell.contentView.addSubview(label)
+        
+        // Decide if this hint is currently available
+        let canUse = isHintEnabled(key: key, cost: cost)
+        cell.contentView.alpha = canUse ? 1.0 : 0.5
+        cell.isUserInteractionEnabled = canUse
+        
+        cell.contentView.backgroundColor = UIColor(red: 0.1, green: 0.4, blue: 0.1, alpha: 1.0)
+        cell.contentView.layer.cornerRadius = 8
+        
+        return cell
+    }
+    
+    func collectionView(_ collectionView: UICollectionView,
+                        layout collectionViewLayout: UICollectionViewLayout,
+                        sizeForItemAt indexPath: IndexPath) -> CGSize {
+        // Adjust cell size as you like
+        return CGSize(width: collectionView.bounds.width - 40, height: 50)
+    }
+    
+    // Optional: if you’d rather use `didSelectItemAt` than a gesture
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        // We could do the same logic as hintTapped(...) in here
+        // but be sure to remove the tap gesture or they’ll conflict.
+    }
+    
+    // Helper to see if a hint is usable
+    private func isHintEnabled(key: String, cost: Int) -> Bool {
+        guard let vm = gameViewController?.viewModel else { return false }
+        
+        // Check coin
+        if vm.coins < cost { return false }
+        
+        switch key {
+        case "remove-1-letter":
+            return vm.canRemoveIncorrectLetters(amount: 1)
+        case "remove-2-letters":
+            return vm.canRemoveIncorrectLetters(amount: 2)
+        case "reveal-1-letter":
+            return vm.canRevealLetters(amount: 1)
+        case "reveal-2-letters":
+            return vm.canRevealLetters(amount: 2)
+        case "skip-level":
+            return true // or some condition
+        default:
+            return false
+        }
+    }
+}
+// MenuViewController.swift
+import UIKit
+
+class MenuViewController: UIViewController {
+    
+    // UI Elements
+    private let backgroundImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+    
+    private let overlayView: UIView = {
+        let view = UIView()
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.5) // Translucent black overlay
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    private let chefQuizLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Chef Quiz"
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 48, weight: .bold)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let playButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Play", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 24, weight: .medium)
+        button.backgroundColor = UIColor(red: 0.1, green: 0.4, blue: 0.1, alpha: 1.0) // Dark green
+        button.setTitleColor(.white, for: .normal)
+        button.layer.cornerRadius = 10
+        button.translatesAutoresizingMaskIntoConstraints = false
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        return button
+    }()
+    
+    private let settingsButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Settings", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 24, weight: .medium)
+        button.backgroundColor = UIColor(red: 0.1, green: 0.4, blue: 0.1, alpha: 1.0) // Dark green
+        button.setTitleColor(.white, for: .normal)
+        button.layer.cornerRadius = 10
+        button.translatesAutoresizingMaskIntoConstraints = false
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        return button
+    }()
+    
+    private let gameCenterButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "gamecontroller"), for: .normal)
+        button.tintColor = .white
+        button.backgroundColor = UIColor(red: 0.1, green: 0.4, blue: 0.1, alpha: 1.0) // Dark green
+        button.layer.cornerRadius = 10
+        button.translatesAutoresizingMaskIntoConstraints = false
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        return button
+    }()
+    
+    private let ludobrosLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Ludobros"
+        label.textAlignment = .center
+        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let ludobrosLogo: UIImageView = {
+        let imageView = UIImageView(image: UIImage(named: "ludobros-logo"))
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        setupActions()
+        setupBackgroundSlideshow()
+        // Hide navigation bar for clean look
+        navigationController?.setNavigationBarHidden(true, animated: false)
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = .black // Default background, slideshow and overlay will layer
+        
+        let stackView = UIStackView(arrangedSubviews: [chefQuizLabel, playButton, settingsButton, gameCenterButton, ludobrosLabel, ludobrosLogo])
+        stackView.axis = .vertical
+        stackView.spacing = 30
+        stackView.alignment = .center
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.addSubview(backgroundImageView)
+        view.addSubview(overlayView)
+        view.addSubview(stackView)
+        
+        NSLayoutConstraint.activate([
+            backgroundImageView.topAnchor.constraint(equalTo: view.topAnchor),
+            backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backgroundImageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            
+            overlayView.topAnchor.constraint(equalTo: view.topAnchor),
+            overlayView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlayView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlayView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            
+            stackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            
+            playButton.widthAnchor.constraint(equalToConstant: 200),
+            playButton.heightAnchor.constraint(equalToConstant: 60),
+            
+            settingsButton.widthAnchor.constraint(equalToConstant: 200),
+            settingsButton.heightAnchor.constraint(equalToConstant: 60),
+            
+            gameCenterButton.widthAnchor.constraint(equalToConstant: 60),
+            gameCenterButton.heightAnchor.constraint(equalToConstant: 60),
+            
+            ludobrosLogo.widthAnchor.constraint(equalToConstant: 100),
+            ludobrosLogo.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    private func setupActions() {
+        playButton.addTarget(self, action: #selector(playTapped), for: .touchUpInside)
+        settingsButton.addTarget(self, action: #selector(settingsTapped), for: .touchUpInside)
+        gameCenterButton.addTarget(self, action: #selector(gameCenterTapped), for: .touchUpInside)
+    }
+    
+    private func setupBackgroundSlideshow() {
+        // Test with one image ("carrot") that replaces itself
+        backgroundImageView.image = UIImage(named: "carrot")
+        
+        // Simple timer to simulate slideshow (replace with same image for now)
+        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.backgroundImageView.image = UIImage(named: "carrot") // Replaces with the same image
+        }
+    }
+    
+    @objc private func playTapped() {
+        let gameViewController = GameViewController()
+        gameViewController.modalPresentationStyle = .fullScreen
+        present(gameViewController, animated: true)
+    }
+    
+    @objc private func settingsTapped() {
+        print("Settings tapped - Navigate to settings")
+        // Placeholder: Add settings screen later
+    }
+    
+    @objc private func gameCenterTapped() {
+        print("Game Center tapped - Open Game Center")
+        // Placeholder: Integrate Game Center later
+    }
+}
+
+
+//
+//  WinModalViewController.swift
+//  Chef Quiz - 2025 iOS
+//
+//  Created by Benjamin Gievis on 06/03/2025.
+//
+
+
+// WinModalViewController.swift
+import UIKit
+
+class WinModalViewController: UIViewController {
+    private let completedLevel: Int
+    private let coinsEarned: Int
+    private weak var gameViewController: GameViewController?
+    
+    // UI Elements
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = "Congratulations!"
+        label.font = .systemFont(ofSize: 24, weight: .bold)
+        label.textAlignment = .center
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let levelLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 18)
+        label.textAlignment = .center
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let coinsLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 18)
+        label.textAlignment = .center
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private let nextButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("Next Level", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 18, weight: .medium)
+        button.backgroundColor = UIColor(red: 0.1, green: 0.4, blue: 0.1, alpha: 1.0) // Dark green
+        button.setTitleColor(.white, for: .normal)
+        button.layer.cornerRadius = 10
+        button.translatesAutoresizingMaskIntoConstraints = false
+        // Add shadow
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.3
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        return button
+    }()
+    
+    init(completedLevel: Int, coinsEarned: Int, gameViewController: GameViewController) {
+        self.completedLevel = completedLevel
+        self.coinsEarned = coinsEarned
+        self.gameViewController = gameViewController
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        setupUI()
+        setupActions()
+        updateLabels()
+    }
+    
+    private func setupUI() {
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.5) // Dimmed background
+        
+        let containerView = UIView()
+        containerView.backgroundColor = UIColor(red: 0.2, green: 0.2, blue: 0.3, alpha: 1.0) // Dark blue-gray
+        containerView.layer.cornerRadius = 12
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(containerView)
+        
+        containerView.addSubview(titleLabel)
+        containerView.addSubview(levelLabel)
+        containerView.addSubview(coinsLabel)
+        containerView.addSubview(nextButton)
+        
+        NSLayoutConstraint.activate([
+            containerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            containerView.widthAnchor.constraint(equalToConstant: 280),
+            containerView.heightAnchor.constraint(equalToConstant: 200),
+            
+            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20),
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            
+            levelLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
+            levelLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            
+            coinsLabel.topAnchor.constraint(equalTo: levelLabel.bottomAnchor, constant: 10),
+            coinsLabel.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            
+            nextButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20),
+            nextButton.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            nextButton.widthAnchor.constraint(equalToConstant: 150),
+            nextButton.heightAnchor.constraint(equalToConstant: 50)
+        ])
+    }
+    
+    private func setupActions() {
+        nextButton.addTarget(self, action: #selector(nextLevelTapped), for: .touchUpInside)
+    }
+    
+    private func updateLabels() {
+        levelLabel.text = "Level \(completedLevel) Completed"
+        coinsLabel.text = "You earned \(coinsEarned) coins"
+    }
+    
+    @objc private func nextLevelTapped() {
+        dismiss(animated: true) {
+            self.gameViewController?.goToNextLevel()
+        }
+    }
+}
