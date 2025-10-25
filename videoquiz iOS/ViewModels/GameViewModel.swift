@@ -96,10 +96,25 @@ class GameViewModel {
         } else {
             print("Failed to load levels for language \(language).")
         }
-        
+
         // Load puzzle-based state (but not coins, since coins are now global)
         loadPuzzleState()
-        
+
+        if currentLevelIndex >= levels.count {
+            currentLevelIndex = max(levels.count - 1, 0)
+        }
+    }
+
+    /// Load levels from a selected theme
+    func loadLevelsForTheme(_ theme: Theme) {
+        levels = theme.levels
+        currentLevelIndex = 0 // Start from first level of theme
+
+        print("📚 Loaded \(levels.count) levels for theme: \(theme.name)")
+
+        // Load puzzle-based state
+        loadPuzzleState()
+
         if currentLevelIndex >= levels.count {
             currentLevelIndex = max(levels.count - 1, 0)
         }
@@ -354,19 +369,25 @@ class GameViewModel {
         // Track levels completed
         let currentLevels = UserDefaults.standard.integer(forKey: "ChefQuizLevelsCompleted")
         UserDefaults.standard.set(currentLevels + 1, forKey: "ChefQuizLevelsCompleted")
-        
+
         // Track perfect levels (completed without hints)
         if !usedHints {
             let currentPerfect = UserDefaults.standard.integer(forKey: "ChefQuizPerfectLevels")
             UserDefaults.standard.set(currentPerfect + 1, forKey: "ChefQuizPerfectLevels")
         }
-        
+
         // Update current streak
         let currentStreak = UserDefaults.standard.integer(forKey: "ChefQuizCurrentStreak")
         UserDefaults.standard.set(currentStreak + 1, forKey: "ChefQuizCurrentStreak")
-        
+
+        // Track theme-specific completion
+        if currentLevelIndex < levels.count {
+            let currentLevel = levels[currentLevelIndex]
+            ThemeData.markLevelCompleted(themeId: currentLevel.themeId)
+        }
+
         UserDefaults.standard.synchronize()
-        
+
         // Check for achievements
         AchievementManager.shared.checkForNewAchievements(gameStats: gameStats)
     }

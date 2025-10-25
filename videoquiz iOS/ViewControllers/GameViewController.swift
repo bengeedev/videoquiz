@@ -71,7 +71,10 @@ class GameViewController: UIViewController {
     // MARK: - View Model and Board Manager
     let viewModel = GameViewModel()
     private var gameBoardManager: GameBoardManager!
-    
+
+    // MARK: - Theme Support
+    var selectedTheme: Theme?
+
     // MARK: - Lifecycle
     required init?(coder: NSCoder) {
         super.init(coder: coder)
@@ -83,9 +86,15 @@ class GameViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+
         // 1) Load levels & restore state
-        viewModel.loadLevels(for: "en")
+        if let theme = selectedTheme {
+            // Load levels from selected theme
+            viewModel.loadLevelsForTheme(theme)
+        } else {
+            // Fallback to legacy loading
+            viewModel.loadLevels(for: "en")
+        }
         viewModel.loadCurrentLevel(with: letterCollectionView)
         
         guard let gameBoardManager = viewModel.gameBoardManager else {

@@ -214,10 +214,10 @@ class MenuViewController: UIViewController {
     
     // MARK: - Button Methods
     @objc private func playTapped() {
-        // Present the main game
-        let gameViewController = GameViewController()
-        gameViewController.modalPresentationStyle = .fullScreen
-        present(gameViewController, animated: true)
+        // Present theme selection screen
+        let themeSelectionVC = ThemeSelectionViewController()
+        themeSelectionVC.modalPresentationStyle = .fullScreen
+        present(themeSelectionVC, animated: true)
     }
     
     @objc private func settingsTapped() {
