@@ -1,12 +1,10 @@
 //
 //  AchievementCell.swift
-//  Chef Quiz - 2025 iOS
+//  VideoQuiz iOS
 //
-//  Created by Benjamin Gievis on 05/03/2025.
+//  Created by Benjamin Gievis
 //
 
-
-// AchievementCell.swift
 import UIKit
 
 class AchievementCell: UITableViewCell {

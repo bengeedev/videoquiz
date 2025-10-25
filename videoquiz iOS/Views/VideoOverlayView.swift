@@ -1,8 +1,8 @@
 //
 //  VideoOverlayView.swift
-//  Chef Quiz - 2025 iOS
+//  VideoQuiz iOS
 //
-//  Beautiful blurred transparent buttons for video overlay
+//  Created by Benjamin Gievis
 //
 
 import UIKit

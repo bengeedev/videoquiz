@@ -1,10 +1,9 @@
 //
 //  WatchAdViewController.swift
-//  videoquiz iOS
+//  VideoQuiz iOS
 //
-//  Created by Benjamin Gievis on 07/03/2025.
+//  Created by Benjamin Gievis
 //
-
 
 import UIKit
 

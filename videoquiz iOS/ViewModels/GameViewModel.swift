@@ -1,6 +1,8 @@
 //
 //  GameViewModel.swift
-//  Chef Quiz - 2025 iOS
+//  VideoQuiz iOS
+//
+//  Created by Benjamin Gievis
 //
 
 import UIKit

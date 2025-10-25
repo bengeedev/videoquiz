@@ -1,4 +1,10 @@
-// AppDelegate.swift
+//
+//  AppDelegate.swift
+//  VideoQuiz iOS
+//
+//  Created by Benjamin Gievis
+//
+
 import UIKit
 
 @main

@@ -1,4 +1,10 @@
-// AchievementModalViewController.swift
+//
+//  AchievementModalViewController.swift
+//  VideoQuiz iOS
+//
+//  Created by Benjamin Gievis
+//
+
 import UIKit
 
 class AchievementModalViewController: UIViewController {

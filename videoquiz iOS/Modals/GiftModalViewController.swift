@@ -1,3 +1,10 @@
+//
+//  GiftModalViewController.swift
+//  VideoQuiz iOS
+//
+//  Created by Benjamin Gievis
+//
+
 import UIKit
 
 class GiftModalViewController: UIViewController {

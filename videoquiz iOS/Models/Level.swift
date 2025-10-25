@@ -1,10 +1,9 @@
 //
 //  Level.swift
-//  Chef Quiz - 2025 iOS
+//  VideoQuiz iOS
 //
-//  Created by Benjamin Gievis on 04/03/2025.
+//  Created by Benjamin Gievis
 //
-
 
 import Foundation
 

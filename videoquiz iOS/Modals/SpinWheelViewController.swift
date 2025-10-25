@@ -1,3 +1,10 @@
+//
+//  SpinWheelViewController.swift
+//  VideoQuiz iOS
+//
+//  Created by Benjamin Gievis
+//
+
 import UIKit
 import QuartzCore
 
