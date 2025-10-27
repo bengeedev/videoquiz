@@ -122,6 +122,15 @@ class ThemeSelectionViewController: UIViewController {
     private func loadThemes() {
         themes = ThemeData.loadThemes()
         print("📚 Loaded \(themes.count) themes")
+
+        if themes.isEmpty {
+            print("⚠️ WARNING: No themes loaded! Check if JSON files are in Xcode project.")
+        } else {
+            for theme in themes {
+                print("  - \(theme.name): \(theme.levels.count) levels, unlocked: \(theme.isUnlocked)")
+            }
+        }
+
         collectionView.reloadData()
     }
 

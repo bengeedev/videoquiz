@@ -109,17 +109,37 @@ struct ThemeData {
 
     /// Load theme configurations from themes.json
     private static func loadThemeConfigs() -> [ThemeConfig]? {
-        guard let path = Bundle.main.path(forResource: "themes", ofType: "json", inDirectory: "Resources/Themes"),
-              let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-            print("Failed to load themes.json")
+        // Try multiple paths to find the JSON file
+        var path = Bundle.main.path(forResource: "themes", ofType: "json", inDirectory: "Resources/Themes")
+
+        if path == nil {
+            print("⚠️ themes.json not found in Resources/Themes, trying root...")
+            path = Bundle.main.path(forResource: "themes", ofType: "json")
+        }
+
+        guard let validPath = path else {
+            print("❌ ERROR: themes.json not found in bundle!")
+            print("Available resources in bundle:")
+            if let resourcePath = Bundle.main.resourcePath {
+                let fileManager = FileManager.default
+                if let files = try? fileManager.contentsOfDirectory(atPath: resourcePath) {
+                    print(files.prefix(20))
+                }
+            }
+            return nil
+        }
+
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: validPath)) else {
+            print("❌ Failed to read themes.json from: \(validPath)")
             return nil
         }
 
         do {
             let configs = try JSONDecoder().decode([ThemeConfig].self, from: data)
+            print("✅ Successfully loaded \(configs.count) theme configs")
             return configs
         } catch {
-            print("Failed to decode themes.json: \(error)")
+            print("❌ Failed to decode themes.json: \(error)")
             return nil
         }
     }
@@ -127,17 +147,31 @@ struct ThemeData {
     /// Load levels for a specific theme
     static func loadLevelsForTheme(_ themeId: String) -> [Level] {
         let filename = "\(themeId)_levels"
-        guard let path = Bundle.main.path(forResource: filename, ofType: "json", inDirectory: "Resources/Levels"),
-              let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-            print("Failed to load \(filename).json")
+
+        // Try multiple paths
+        var path = Bundle.main.path(forResource: filename, ofType: "json", inDirectory: "Resources/Levels")
+
+        if path == nil {
+            print("⚠️ \(filename).json not found in Resources/Levels, trying root...")
+            path = Bundle.main.path(forResource: filename, ofType: "json")
+        }
+
+        guard let validPath = path else {
+            print("❌ ERROR: \(filename).json not found in bundle!")
+            return []
+        }
+
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: validPath)) else {
+            print("❌ Failed to read \(filename).json from: \(validPath)")
             return []
         }
 
         do {
             let levels = try JSONDecoder().decode([Level].self, from: data)
+            print("✅ Loaded \(levels.count) levels for theme: \(themeId)")
             return levels
         } catch {
-            print("Failed to decode \(filename).json: \(error)")
+            print("❌ Failed to decode \(filename).json: \(error)")
             return []
         }
     }
