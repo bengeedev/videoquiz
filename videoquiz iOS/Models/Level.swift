@@ -21,11 +21,24 @@ struct Level: Codable {
     var videoPaths: (videoA: String?, videoB: String?) {
         guard let mediaId = mediaId else { return (nil, nil) }
 
-        // Try without directory first (files at bundle root)
-        var pathA = Bundle.main.path(forResource: "\(mediaId)A", ofType: "mp4")
-        var pathB = Bundle.main.path(forResource: "\(mediaId)B", ofType: "mp4")
+        // Extract theme code from mediaId (e.g., "FOOD_DESSERT_0001" -> "FOOD_DESSERT")
+        let parts = mediaId.split(separator: "_")
+        guard parts.count >= 3 else { return (nil, nil) }
+        let themeCode = parts.dropLast().joined(separator: "_")
 
-        // If not found, try with Resources/Videos directory
+        // Try new structure first: Resources/Videos/FOOD_DESSERT/
+        var pathA = Bundle.main.path(
+            forResource: "\(mediaId)A",
+            ofType: "mp4",
+            inDirectory: "Resources/Videos/\(themeCode)"
+        )
+        var pathB = Bundle.main.path(
+            forResource: "\(mediaId)B",
+            ofType: "mp4",
+            inDirectory: "Resources/Videos/\(themeCode)"
+        )
+
+        // Fallback to old structure: Resources/Videos/ (root)
         if pathA == nil {
             pathA = Bundle.main.path(forResource: "\(mediaId)A", ofType: "mp4", inDirectory: "Resources/Videos")
         }
@@ -33,7 +46,16 @@ struct Level: Codable {
             pathB = Bundle.main.path(forResource: "\(mediaId)B", ofType: "mp4", inDirectory: "Resources/Videos")
         }
 
+        // Final fallback: bundle root
+        if pathA == nil {
+            pathA = Bundle.main.path(forResource: "\(mediaId)A", ofType: "mp4")
+        }
+        if pathB == nil {
+            pathB = Bundle.main.path(forResource: "\(mediaId)B", ofType: "mp4")
+        }
+
         print("🎬 Looking for dual videos: \(mediaId)")
+        print("   Theme code: \(themeCode)")
         print("   Video A path: \(pathA ?? "NOT FOUND")")
         print("   Video B path: \(pathB ?? "NOT FOUND")")
 
@@ -98,12 +120,16 @@ struct Theme: Codable {
 // Theme configuration model (from themes.json)
 struct ThemeConfig: Codable {
     let id: String
+    let themeCode: String?       // NEW: Theme code (e.g., "FOOD_DESSERT")
     let name: String
     let description: String
     let icon: String
     let color: String
+    let category: String?         // NEW: "standard", "event", "premium"
     let isUnlocked: Bool
+    let coinPrice: Int?           // NEW: Coin price to unlock (0 = free)
     let unlockRequirement: Int
+    let order: Int?               // NEW: Display order
 }
 
 // Theme data manager
@@ -143,12 +169,19 @@ struct ThemeData {
 
     /// Load theme configurations from themes.json
     private static func loadThemeConfigs() -> [ThemeConfig]? {
-        // Try multiple paths to find the JSON file
-        var path = Bundle.main.path(forResource: "themes", ofType: "json", inDirectory: "Resources/Themes")
+        // Try bundle root first (where Xcode copies files)
+        var path = Bundle.main.path(forResource: "themes", ofType: "json")
 
+        // Fallback to old structure: Resources/Themes/
         if path == nil {
-            print("⚠️ themes.json not found in Resources/Themes, trying root...")
-            path = Bundle.main.path(forResource: "themes", ofType: "json")
+            print("⚠️ themes.json not found in bundle root, trying old path...")
+            path = Bundle.main.path(forResource: "themes", ofType: "json", inDirectory: "Resources/Themes")
+        }
+
+        // Try new structure: Resources/Content/en/
+        if path == nil {
+            print("⚠️ themes.json not found in Resources/Themes, trying Content/en...")
+            path = Bundle.main.path(forResource: "themes", ofType: "json", inDirectory: "Resources/Content/en")
         }
 
         guard let validPath = path else {
@@ -180,23 +213,30 @@ struct ThemeData {
 
     /// Load levels for a specific theme
     static func loadLevelsForTheme(_ themeId: String) -> [Level] {
-        let filename = "\(themeId)_levels"
+        // Try bundle root first (where Xcode copies files): food_dessert.json
+        var path = Bundle.main.path(forResource: themeId, ofType: "json")
 
-        // Try multiple paths
-        var path = Bundle.main.path(forResource: filename, ofType: "json", inDirectory: "Resources/Levels")
-
+        // Fallback to old structure: Resources/Levels/food_levels.json
         if path == nil {
-            print("⚠️ \(filename).json not found in Resources/Levels, trying root...")
-            path = Bundle.main.path(forResource: filename, ofType: "json")
+            print("⚠️ \(themeId).json not found in bundle root, trying old path...")
+            let oldFilename = "\(themeId)_levels"
+            path = Bundle.main.path(forResource: oldFilename, ofType: "json", inDirectory: "Resources/Levels")
+        }
+
+        // Try new structure: Resources/Content/en/Levels/
+        if path == nil {
+            let filename = "\(themeId)_levels"
+            print("⚠️ \(filename).json not found in Resources/Levels, trying Content/en/Levels...")
+            path = Bundle.main.path(forResource: themeId, ofType: "json", inDirectory: "Resources/Content/en/Levels")
         }
 
         guard let validPath = path else {
-            print("❌ ERROR: \(filename).json not found in bundle!")
+            print("❌ ERROR: \(themeId).json not found in bundle!")
             return []
         }
 
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: validPath)) else {
-            print("❌ Failed to read \(filename).json from: \(validPath)")
+            print("❌ Failed to read \(themeId).json from: \(validPath)")
             return []
         }
 
@@ -205,7 +245,7 @@ struct ThemeData {
             print("✅ Loaded \(levels.count) levels for theme: \(themeId)")
             return levels
         } catch {
-            print("❌ Failed to decode \(filename).json: \(error)")
+            print("❌ Failed to decode \(themeId).json: \(error)")
             return []
         }
     }

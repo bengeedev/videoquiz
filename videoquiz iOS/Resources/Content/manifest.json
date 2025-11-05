@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "languages": [
+    {
+      "code": "en",
+      "name": "English",
+      "status": "active"
+    }
+  ]
+}

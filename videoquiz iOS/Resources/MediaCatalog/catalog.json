@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-11-05",
+  "videos": [
+    {
+      "baseId": "FOOD_DESSERT_0001",
+      "themeCode": "FOOD_DESSERT",
+      "variants": {
+        "A": {
+          "filename": "FOOD_DESSERT/FOOD_DESSERT_0001A.mp4",
+          "duration": 8.5,
+          "notes": "Tiramisu preparation"
+        },
+        "B": {
+          "filename": "FOOD_DESSERT/FOOD_DESSERT_0001B.mp4",
+          "duration": 8.5,
+          "notes": "Tiramisu serving"
+        }
+      }
+    }
+  ]
+}

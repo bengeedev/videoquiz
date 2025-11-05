@@ -1,0 +1,15 @@
+[
+  {
+    "id": "food_dessert",
+    "themeCode": "FOOD_DESSERT",
+    "name": "Food - Desserts",
+    "description": "Delicious desserts from around the world",
+    "icon": "birthday.cake.fill",
+    "color": "#FF6B6B",
+    "category": "standard",
+    "isUnlocked": true,
+    "coinPrice": 0,
+    "unlockRequirement": 0,
+    "order": 1
+  }
+]
