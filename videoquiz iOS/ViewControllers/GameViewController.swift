@@ -19,6 +19,14 @@ class GameViewController: UIViewController {
     var videoPlayerLayer: AVPlayerLayer?
     let videoControlButton = UIButton()  // Pause/Play button
     var isVideoPlaying = true
+
+    // Dual video support
+    var isDualVideo = false
+    var currentlyPlayingA = true
+    var videoPlayerA: AVPlayer?
+    var videoPlayerLayerA: AVPlayerLayer?
+    var videoPlayerB: AVPlayer?
+    var videoPlayerLayerB: AVPlayerLayer?
     let backgroundView = UIView()
     let letterCollectionView = GameBoardManager.UIComponents.setupLetterCollectionView()
     let keyboardCollectionView = GameBoardManager.UIComponents.setupKeyboardCollectionView()
@@ -124,9 +132,11 @@ class GameViewController: UIViewController {
         super.viewDidLayoutSubviews()
         updateTargetZoneLayout()
         updateKeyboardLayout()
-        
-        // Update video player layer frame
+
+        // Update video player layer frames
         videoPlayerLayer?.frame = videoPlayerView.bounds
+        videoPlayerLayerA?.frame = videoPlayerView.bounds
+        videoPlayerLayerB?.frame = videoPlayerView.bounds
     }
     
     func animateRemoveLetters(_ removedIndices: [Int]) {
@@ -196,7 +206,12 @@ class GameViewController: UIViewController {
             print("Loading video: \(videoName)")
             loadVideo(named: videoName.lowercased())
             showVideoView()
-            
+
+        case .dualVideo(let mediaId):
+            print("Loading dual video: \(mediaId)")
+            loadDualVideo(mediaId: mediaId)
+            showVideoView()
+
         case .placeholder:
             print("No media available, using placeholder")
             imageView.image = UIImage(named: "placeholder")
@@ -272,17 +287,151 @@ class GameViewController: UIViewController {
         isVideoPlaying = true
         updateVideoControlButton()
     }
-    
+
+    private func loadDualVideo(mediaId: String) {
+        // Stop current video if playing
+        stopVideo()
+
+        // Get video paths from current level
+        guard let currentLevel = viewModel.currentLevel else {
+            print("No current level")
+            showImageView()
+            return
+        }
+
+        let paths = currentLevel.videoPaths
+
+        // Get both paths
+        guard let pathA = paths.videoA, let pathB = paths.videoB else {
+            print("Could not find both videos for media ID: \(mediaId)")
+            showImageView()
+            return
+        }
+
+        print("🎬 Setting up dual video system for: \(mediaId)")
+        print("   Video view bounds: \(videoPlayerView.bounds)")
+
+        // Create both players
+        let urlA = URL(fileURLWithPath: pathA)
+        let urlB = URL(fileURLWithPath: pathB)
+
+        videoPlayerA = AVPlayer(url: urlA)
+        videoPlayerB = AVPlayer(url: urlB)
+
+        print("   Created players A and B")
+
+        // Create both layers
+        videoPlayerLayerA = AVPlayerLayer(player: videoPlayerA)
+        videoPlayerLayerA?.videoGravity = .resizeAspectFill
+        videoPlayerLayerA?.frame = videoPlayerView.bounds
+        videoPlayerLayerA?.backgroundColor = UIColor.clear.cgColor
+        videoPlayerLayerA?.opacity = 1.0  // A starts visible
+
+        videoPlayerLayerB = AVPlayerLayer(player: videoPlayerB)
+        videoPlayerLayerB?.videoGravity = .resizeAspectFill
+        videoPlayerLayerB?.frame = videoPlayerView.bounds
+        videoPlayerLayerB?.backgroundColor = UIColor.clear.cgColor
+        videoPlayerLayerB?.opacity = 0.0  // B starts invisible
+
+        print("   Layer A frame: \(videoPlayerLayerA?.frame ?? .zero), opacity: \(videoPlayerLayerA?.opacity ?? 0)")
+        print("   Layer B frame: \(videoPlayerLayerB?.frame ?? .zero), opacity: \(videoPlayerLayerB?.opacity ?? 0)")
+
+        // Add both layers (A on bottom, B on top)
+        if let layerA = videoPlayerLayerA {
+            videoPlayerView.layer.addSublayer(layerA)
+        }
+        if let layerB = videoPlayerLayerB {
+            videoPlayerView.layer.addSublayer(layerB)
+        }
+
+        // Set up notifications for both players
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(videoADidFinish),
+            name: .AVPlayerItemDidPlayToEndTime,
+            object: videoPlayerA?.currentItem
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(videoBDidFinish),
+            name: .AVPlayerItemDidPlayToEndTime,
+            object: videoPlayerB?.currentItem
+        )
+
+        // Enable dual video mode
+        isDualVideo = true
+        currentlyPlayingA = true
+
+        // Start playing video A
+        print("   Starting video A playback")
+        videoPlayerA?.play()
+        isVideoPlaying = true
+        updateVideoControlButton()
+
+        print("   Dual video setup complete. Layer A should be visible.")
+    }
+
+    @objc private func videoADidFinish() {
+        print("🎬 Video A finished, fading to B")
+        currentlyPlayingA = false
+
+        // Restart B from beginning
+        videoPlayerB?.seek(to: .zero)
+
+        // Cross-fade: A fades out, B fades in
+        UIView.animate(withDuration: 0.5) {
+            self.videoPlayerLayerA?.opacity = 0.0
+            self.videoPlayerLayerB?.opacity = 1.0
+        }
+
+        // Start playing B
+        videoPlayerB?.play()
+    }
+
+    @objc private func videoBDidFinish() {
+        print("🎬 Video B finished, fading to A")
+        currentlyPlayingA = true
+
+        // Restart A from beginning
+        videoPlayerA?.seek(to: .zero)
+
+        // Cross-fade: B fades out, A fades in
+        UIView.animate(withDuration: 0.5) {
+            self.videoPlayerLayerB?.opacity = 0.0
+            self.videoPlayerLayerA?.opacity = 1.0
+        }
+
+        // Start playing A
+        videoPlayerA?.play()
+    }
+
     private func stopVideo() {
+        // Stop single video player
         videoPlayer?.pause()
         videoPlayerLayer?.removeFromSuperlayer()
         videoPlayerLayer = nil
         videoPlayer = nil
+
+        // Stop dual video players
+        videoPlayerA?.pause()
+        videoPlayerB?.pause()
+        videoPlayerLayerA?.removeFromSuperlayer()
+        videoPlayerLayerB?.removeFromSuperlayer()
+        videoPlayerLayerA = nil
+        videoPlayerLayerB = nil
+        videoPlayerA = nil
+        videoPlayerB = nil
+
+        // Remove all notifications
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+
+        // Reset dual video state
+        isDualVideo = false
+        currentlyPlayingA = true
     }
     
     @objc private func videoDidFinishPlaying() {
-        // Loop the video
+        // This is only for single video looping (dual videos have their own handlers)
         videoPlayer?.seek(to: .zero)
         if isVideoPlaying {
             videoPlayer?.play()
@@ -388,7 +537,7 @@ class GameViewController: UIViewController {
     
     @objc private func videoControlButtonTapped() {
         print("Video control button tapped!")
-        
+
         // Add subtle tap animation
         UIView.animate(withDuration: 0.1, animations: {
             self.videoControlButton.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
@@ -397,19 +546,33 @@ class GameViewController: UIViewController {
                 self.videoControlButton.transform = .identity
             }
         }
-        
+
         if isVideoPlaying {
-            // Pause video
+            // Pause video(s)
             print("Pausing video")
-            videoPlayer?.pause()
+            if isDualVideo {
+                videoPlayerA?.pause()
+                videoPlayerB?.pause()
+            } else {
+                videoPlayer?.pause()
+            }
             isVideoPlaying = false
         } else {
-            // Play video
+            // Play video(s)
             print("Playing video")
-            videoPlayer?.play()
+            if isDualVideo {
+                // Play the currently active video
+                if currentlyPlayingA {
+                    videoPlayerA?.play()
+                } else {
+                    videoPlayerB?.play()
+                }
+            } else {
+                videoPlayer?.play()
+            }
             isVideoPlaying = true
         }
-        
+
         updateVideoControlButton()
         
         // Add haptic feedback

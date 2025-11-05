@@ -13,11 +13,44 @@ struct Level: Codable {
     let themeId: String
     let image: String?  // Optional for backward compatibility
     let video: String?  // Video field (PRIMARY - video-first approach)
+    let mediaId: String?  // NEW: For dual video support (e.g., "FOOD_DESSERT_0001")
     let word: String
     let extraLetters: [String]
 
+    // Computed property to get video paths for A and B variants
+    var videoPaths: (videoA: String?, videoB: String?) {
+        guard let mediaId = mediaId else { return (nil, nil) }
+
+        // Try without directory first (files at bundle root)
+        var pathA = Bundle.main.path(forResource: "\(mediaId)A", ofType: "mp4")
+        var pathB = Bundle.main.path(forResource: "\(mediaId)B", ofType: "mp4")
+
+        // If not found, try with Resources/Videos directory
+        if pathA == nil {
+            pathA = Bundle.main.path(forResource: "\(mediaId)A", ofType: "mp4", inDirectory: "Resources/Videos")
+        }
+        if pathB == nil {
+            pathB = Bundle.main.path(forResource: "\(mediaId)B", ofType: "mp4", inDirectory: "Resources/Videos")
+        }
+
+        print("🎬 Looking for dual videos: \(mediaId)")
+        print("   Video A path: \(pathA ?? "NOT FOUND")")
+        print("   Video B path: \(pathB ?? "NOT FOUND")")
+
+        return (pathA, pathB)
+    }
+
     // Computed property to get the media type
     var mediaType: MediaType {
+        // Check for dual video first
+        if let mediaId = mediaId {
+            let paths = videoPaths
+            if paths.videoA != nil && paths.videoB != nil {
+                return .dualVideo(mediaId)
+            }
+        }
+
+        // Fallback to single video
         if let video = video, !video.isEmpty {
             return .video(video)
         } else if let image = image, !image.isEmpty {
@@ -32,6 +65,7 @@ struct Level: Codable {
 enum MediaType {
     case image(String)
     case video(String)
+    case dualVideo(String)  // NEW: Dual video with A/B variants
     case placeholder
 }
 

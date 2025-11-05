@@ -86,7 +86,11 @@ class GameViewModel {
     var currentLevelMedia: MediaType {
         return levels[safe: currentLevelIndex]?.mediaType ?? .placeholder
     }
-    
+
+    var currentLevel: Level? {
+        return levels[safe: currentLevelIndex]
+    }
+
     // ---------------------------------
     // MARK: - Loading Levels & State
     // ---------------------------------
