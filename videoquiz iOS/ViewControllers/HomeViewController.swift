@@ -15,6 +15,7 @@ class HomeViewController: UIViewController {
     private var categorizedThemes: [String: [Theme]] = [:]
     private var categoryOrder: [String] = []
     private var filteredThemes: [Theme] = []
+    private var eventThemes: [Theme] = []  // Featured event themes for hero banner
 
     // Filter options
     enum FilterOption {
@@ -199,6 +200,7 @@ class HomeViewController: UIViewController {
         // Main collection view setup
         collectionView.delegate = self
         collectionView.dataSource = self
+        collectionView.register(HeroBannerCell.self, forCellWithReuseIdentifier: "HeroBannerCell")
         collectionView.register(ThemeCarouselCell.self, forCellWithReuseIdentifier: "ThemeCarouselCell")
         collectionView.register(ThemeGridCell.self, forCellWithReuseIdentifier: "ThemeGridCell")
         collectionView.register(SectionHeaderView.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "SectionHeader")
@@ -227,58 +229,91 @@ class HomeViewController: UIViewController {
     // MARK: - Compositional Layout
 
     private func createCompositionalLayout() -> UICollectionViewLayout {
-        let layout = UICollectionViewCompositionalLayout { (sectionIndex, environment) -> NSCollectionLayoutSection? in
+        let layout = UICollectionViewCompositionalLayout { [weak self] (sectionIndex, environment) -> NSCollectionLayoutSection? in
+            guard let self = self else { return nil }
 
-            // Calculate item width based on screen size
             let screenWidth = environment.container.effectiveContentSize.width
-            let itemWidth: CGFloat
-            let itemHeight: CGFloat
 
-            // Adaptive sizing for different devices
-            if screenWidth > 400 { // Larger iPhones (Pro Max, Plus)
-                itemWidth = screenWidth * 0.75
-                itemHeight = itemWidth * 0.56 // 16:9 aspect ratio
-            } else { // Standard iPhones
-                itemWidth = screenWidth * 0.8
-                itemHeight = itemWidth * 0.56
+            // Section 0: Hero Banner (if there are event themes)
+            if sectionIndex == 0 && !self.eventThemes.isEmpty {
+                return self.createHeroBannerSection(screenWidth: screenWidth)
             }
 
-            // Item
-            let itemSize = NSCollectionLayoutSize(
-                widthDimension: .absolute(itemWidth),
-                heightDimension: .absolute(itemHeight)
-            )
-            let item = NSCollectionLayoutItem(layoutSize: itemSize)
-
-            // Group
-            let groupSize = NSCollectionLayoutSize(
-                widthDimension: .absolute(itemWidth),
-                heightDimension: .absolute(itemHeight)
-            )
-            let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
-
-            // Section
-            let section = NSCollectionLayoutSection(group: group)
-            section.orthogonalScrollingBehavior = .groupPagingCentered
-            section.interGroupSpacing = 16
-            section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 20, bottom: 32, trailing: 20)
-
-            // Header
-            let headerSize = NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1.0),
-                heightDimension: .estimated(50)
-            )
-            let header = NSCollectionLayoutBoundarySupplementaryItem(
-                layoutSize: headerSize,
-                elementKind: UICollectionView.elementKindSectionHeader,
-                alignment: .top
-            )
-            section.boundarySupplementaryItems = [header]
-
-            return section
+            // Regular category sections
+            return self.createCategorySection(screenWidth: screenWidth)
         }
 
         return layout
+    }
+
+    private func createHeroBannerSection(screenWidth: CGFloat) -> NSCollectionLayoutSection {
+        // Hero banner takes full width with padding
+        let itemWidth = screenWidth - 40
+        let itemHeight = itemWidth * 0.65 // Taller aspect ratio for hero banner
+
+        let itemSize = NSCollectionLayoutSize(
+            widthDimension: .absolute(itemWidth),
+            heightDimension: .absolute(itemHeight)
+        )
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+
+        let groupSize = NSCollectionLayoutSize(
+            widthDimension: .absolute(itemWidth),
+            heightDimension: .absolute(itemHeight)
+        )
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+
+        let section = NSCollectionLayoutSection(group: group)
+        section.orthogonalScrollingBehavior = .groupPaging
+        section.interGroupSpacing = 16
+        section.contentInsets = NSDirectionalEdgeInsets(top: 20, leading: 20, bottom: 40, trailing: 20)
+
+        return section
+    }
+
+    private func createCategorySection(screenWidth: CGFloat) -> NSCollectionLayoutSection {
+        let itemWidth: CGFloat
+        let itemHeight: CGFloat
+
+        // Adaptive sizing for different devices
+        if screenWidth > 400 {
+            itemWidth = screenWidth * 0.75
+            itemHeight = itemWidth * 0.56
+        } else {
+            itemWidth = screenWidth * 0.8
+            itemHeight = itemWidth * 0.56
+        }
+
+        let itemSize = NSCollectionLayoutSize(
+            widthDimension: .absolute(itemWidth),
+            heightDimension: .absolute(itemHeight)
+        )
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+
+        let groupSize = NSCollectionLayoutSize(
+            widthDimension: .absolute(itemWidth),
+            heightDimension: .absolute(itemHeight)
+        )
+        let group = NSCollectionLayoutGroup.horizontal(layoutSize: groupSize, subitems: [item])
+
+        let section = NSCollectionLayoutSection(group: group)
+        section.orthogonalScrollingBehavior = .groupPagingCentered
+        section.interGroupSpacing = 16
+        section.contentInsets = NSDirectionalEdgeInsets(top: 16, leading: 20, bottom: 32, trailing: 20)
+
+        // Header
+        let headerSize = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1.0),
+            heightDimension: .estimated(50)
+        )
+        let header = NSCollectionLayoutBoundarySupplementaryItem(
+            layoutSize: headerSize,
+            elementKind: UICollectionView.elementKindSectionHeader,
+            alignment: .top
+        )
+        section.boundarySupplementaryItems = [header]
+
+        return section
     }
 
     // MARK: - Data Loading
@@ -286,12 +321,16 @@ class HomeViewController: UIViewController {
     private func loadThemes() {
         themes = ThemeData.loadThemes()
         categorizeThemes()
+        extractEventThemes()
         buildAvailableFilters()
         applyFilter(selectedFilter)
 
         print("📚 Loaded \(themes.count) themes")
         for (category, categoryThemes) in categorizedThemes {
             print("  - \(category): \(categoryThemes.count) themes")
+        }
+        if !eventThemes.isEmpty {
+            print("🎉 Found \(eventThemes.count) event theme(s)")
         }
     }
 
@@ -313,6 +352,10 @@ class HomeViewController: UIViewController {
             let order = ["food": 0, "animals": 1, "science": 2, "geography": 3, "sports": 4, "entertainment": 5, "other": 99]
             return (order[category1] ?? 99) < (order[category2] ?? 99)
         }
+    }
+
+    private func extractEventThemes() {
+        eventThemes = themes.filter { $0.isEvent }
     }
 
     private func buildAvailableFilters() {
@@ -481,7 +524,9 @@ extension HomeViewController: UICollectionViewDataSource, UICollectionViewDelega
         // Main collection view
         switch selectedFilter {
         case .home:
-            return categoryOrder.count
+            // Add 1 section for hero banner if there are event themes
+            let heroBannerSections = eventThemes.isEmpty ? 0 : 1
+            return heroBannerSections + categoryOrder.count
         default:
             return 1  // Grid view has single section
         }
@@ -495,7 +540,14 @@ extension HomeViewController: UICollectionViewDataSource, UICollectionViewDelega
         // Main collection view
         switch selectedFilter {
         case .home:
-            let category = categoryOrder[section]
+            // Section 0 is hero banner if we have event themes
+            if section == 0 && !eventThemes.isEmpty {
+                return eventThemes.count
+            }
+
+            // Calculate actual category index
+            let categoryIndex = eventThemes.isEmpty ? section : section - 1
+            let category = categoryOrder[categoryIndex]
             return categorizedThemes[category]?.count ?? 0
         default:
             return filteredThemes.count
@@ -513,8 +565,18 @@ extension HomeViewController: UICollectionViewDataSource, UICollectionViewDelega
         // Main collection view
         switch selectedFilter {
         case .home:
+            // Section 0 is hero banner if we have event themes
+            if indexPath.section == 0 && !eventThemes.isEmpty {
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "HeroBannerCell", for: indexPath) as! HeroBannerCell
+                let theme = eventThemes[indexPath.item]
+                cell.configure(with: theme)
+                return cell
+            }
+
+            // Regular category sections
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ThemeCarouselCell", for: indexPath) as! ThemeCarouselCell
-            let category = categoryOrder[indexPath.section]
+            let categoryIndex = eventThemes.isEmpty ? indexPath.section : indexPath.section - 1
+            let category = categoryOrder[categoryIndex]
             if let theme = categorizedThemes[category]?[indexPath.item] {
                 cell.configure(with: theme)
             }
@@ -531,7 +593,9 @@ extension HomeViewController: UICollectionViewDataSource, UICollectionViewDelega
     func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
         let header = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "SectionHeader", for: indexPath) as! SectionHeaderView
 
-        let category = categoryOrder[indexPath.section]
+        // Calculate actual category index (accounting for hero banner)
+        let categoryIndex = (!eventThemes.isEmpty && indexPath.section > 0) ? indexPath.section - 1 : indexPath.section
+        let category = categoryOrder[categoryIndex]
         let categoryTitle = category.capitalized.replacingOccurrences(of: "_", with: " ")
         header.configure(with: categoryTitle)
 
@@ -618,6 +682,174 @@ extension HomeViewController: SideMenuDelegate {
         loadThemes()
 
         print("Game data has been reset.")
+    }
+}
+
+// MARK: - Hero Banner Cell
+
+class HeroBannerCell: UICollectionViewCell {
+
+    private let containerView: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.layer.cornerRadius = 20
+        view.clipsToBounds = true
+        return view
+    }()
+
+    private let backgroundImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    private let gradientLayer: CAGradientLayer = {
+        let layer = CAGradientLayer()
+        layer.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.8).cgColor
+        ]
+        layer.locations = [0.4, 1.0]
+        return layer
+    }()
+
+    private let eventBadge: UIView = {
+        let view = UIView()
+        view.backgroundColor = UIColor(red: 1.0, green: 0.27, blue: 0.23, alpha: 1.0)
+        view.layer.cornerRadius = 12
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+
+    private let eventLabel: UILabel = {
+        let label = UILabel()
+        label.text = "FEATURED EVENT"
+        label.font = .systemFont(ofSize: 11, weight: .bold)
+        label.textColor = .white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let iconImageView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = .white
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    private let titleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 32, weight: .bold)
+        label.textColor = .white
+        label.numberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let descriptionLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.textColor = .white.withAlphaComponent(0.9)
+        label.numberOfLines = 2
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let levelCountLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 14, weight: .semibold)
+        label.textColor = .white.withAlphaComponent(0.8)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupUI()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradientLayer.frame = backgroundImageView.bounds
+
+        // Shadow
+        containerView.layer.shadowColor = UIColor.black.cgColor
+        containerView.layer.shadowOpacity = 0.3
+        containerView.layer.shadowOffset = CGSize(width: 0, height: 8)
+        containerView.layer.shadowRadius = 16
+        containerView.layer.masksToBounds = false
+    }
+
+    private func setupUI() {
+        contentView.addSubview(containerView)
+        containerView.addSubview(backgroundImageView)
+        backgroundImageView.layer.addSublayer(gradientLayer)
+        containerView.addSubview(eventBadge)
+        eventBadge.addSubview(eventLabel)
+        containerView.addSubview(iconImageView)
+        containerView.addSubview(titleLabel)
+        containerView.addSubview(descriptionLabel)
+        containerView.addSubview(levelCountLabel)
+
+        NSLayoutConstraint.activate([
+            containerView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            containerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            containerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            containerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            backgroundImageView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            backgroundImageView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            backgroundImageView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            backgroundImageView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+
+            eventBadge.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20),
+            eventBadge.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            eventBadge.heightAnchor.constraint(equalToConstant: 24),
+
+            eventLabel.leadingAnchor.constraint(equalTo: eventBadge.leadingAnchor, constant: 12),
+            eventLabel.trailingAnchor.constraint(equalTo: eventBadge.trailingAnchor, constant: -12),
+            eventLabel.centerYAnchor.constraint(equalTo: eventBadge.centerYAnchor),
+
+            iconImageView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            iconImageView.bottomAnchor.constraint(equalTo: titleLabel.topAnchor, constant: -12),
+            iconImageView.widthAnchor.constraint(equalToConstant: 48),
+            iconImageView.heightAnchor.constraint(equalToConstant: 48),
+
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            titleLabel.bottomAnchor.constraint(equalTo: descriptionLabel.topAnchor, constant: -8),
+
+            descriptionLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            descriptionLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            descriptionLabel.bottomAnchor.constraint(equalTo: levelCountLabel.topAnchor, constant: -8),
+
+            levelCountLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            levelCountLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20)
+        ])
+    }
+
+    func configure(with theme: Theme) {
+        titleLabel.text = theme.name
+        descriptionLabel.text = theme.description
+        iconImageView.image = UIImage(systemName: theme.icon)
+        levelCountLabel.text = "\(theme.levels.count) levels"
+
+        // Set placeholder background with theme color
+        if let themeColor = UIColor(hex: theme.color) {
+            containerView.backgroundColor = themeColor.withAlphaComponent(0.3)
+            gradientLayer.colors = [
+                themeColor.withAlphaComponent(0.5).cgColor,
+                UIColor.black.withAlphaComponent(0.9).cgColor
+            ]
+            iconImageView.tintColor = themeColor
+            setNeedsLayout()
+        }
     }
 }
 
