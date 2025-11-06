@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "themeId": "food_dessert",
+    "mediaId": "FOOD_DESSERT_0001",
+    "word": "TIRAMISU",
+    "hint": "Italian coffee-flavored dessert",
+    "difficulty": 2,
+    "extraLetters": ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "V", "W", "X", "Y", "Z"]
+  }
+]

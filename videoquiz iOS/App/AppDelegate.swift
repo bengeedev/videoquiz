@@ -16,9 +16,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         window = UIWindow(frame: UIScreen.main.bounds)
-        // Instantiate MenuViewController as the root view controller
-        let menuVC = MenuViewController()
-        window?.rootViewController = UINavigationController(rootViewController: menuVC)
+        // Instantiate HomeViewController as the root view controller
+        let homeVC = HomeViewController()
+        window?.rootViewController = UINavigationController(rootViewController: homeVC)
         window?.makeKeyAndVisible()
         return true
     }

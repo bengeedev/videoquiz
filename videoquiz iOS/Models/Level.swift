@@ -98,19 +98,30 @@ struct Theme: Codable {
     let description: String
     let icon: String
     let color: String
+    let mainCategory: String?     // Main category: "food", "animals", "science", etc.
+    let subTheme: String?         // Sub-theme: "desserts", "chinese", "wild", etc.
+    let isNew: Bool               // Show in "New Themes" section
+    let isEvent: Bool             // Featured in hero banner
     var isUnlocked: Bool
+    let coinPrice: Int            // Coins needed to unlock
     let unlockRequirement: Int
     var levels: [Level]
     var completionPercentage: Double
 
     init(id: String, name: String, description: String, icon: String, color: String,
-         isUnlocked: Bool, unlockRequirement: Int, levels: [Level] = [], completionPercentage: Double = 0.0) {
+         mainCategory: String? = nil, subTheme: String? = nil, isNew: Bool = false, isEvent: Bool = false,
+         isUnlocked: Bool, coinPrice: Int = 0, unlockRequirement: Int, levels: [Level] = [], completionPercentage: Double = 0.0) {
         self.id = id
         self.name = name
         self.description = description
         self.icon = icon
         self.color = color
+        self.mainCategory = mainCategory
+        self.subTheme = subTheme
+        self.isNew = isNew
+        self.isEvent = isEvent
         self.isUnlocked = isUnlocked
+        self.coinPrice = coinPrice
         self.unlockRequirement = unlockRequirement
         self.levels = levels
         self.completionPercentage = completionPercentage
@@ -120,16 +131,19 @@ struct Theme: Codable {
 // Theme configuration model (from themes.json)
 struct ThemeConfig: Codable {
     let id: String
-    let themeCode: String?       // NEW: Theme code (e.g., "FOOD_DESSERT")
+    let themeCode: String?           // Theme code for video lookup (e.g., "FOOD_DESSERT")
+    let mainCategory: String?        // Main category: "food", "animals", "science", etc.
+    let subTheme: String?            // Sub-theme: "desserts", "chinese", "wild", etc.
     let name: String
     let description: String
     let icon: String
     let color: String
-    let category: String?         // NEW: "standard", "event", "premium"
+    let isNew: Bool?                 // Show in "New Themes" section
+    let isEvent: Bool?               // Featured in hero banner
     let isUnlocked: Bool
-    let coinPrice: Int?           // NEW: Coin price to unlock (0 = free)
+    let coinPrice: Int?              // Coin price to unlock (0 = free)
     let unlockRequirement: Int
-    let order: Int?               // NEW: Display order
+    let order: Int?                  // Display order
 }
 
 // Theme data manager
@@ -156,7 +170,12 @@ struct ThemeData {
                 description: config.description,
                 icon: config.icon,
                 color: config.color,
+                mainCategory: config.mainCategory,
+                subTheme: config.subTheme,
+                isNew: config.isNew ?? false,
+                isEvent: config.isEvent ?? false,
                 isUnlocked: isUnlocked,
+                coinPrice: config.coinPrice ?? 0,
                 unlockRequirement: config.unlockRequirement,
                 levels: levels,
                 completionPercentage: completion
